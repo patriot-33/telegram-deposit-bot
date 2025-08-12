@@ -280,6 +280,25 @@ class TelegramDepositBot {
       // Force immediate flush
       process.stdout.write(`\n🚨 SIGTERM - PID ${process.pid} - ${uptimeMinutes}m - ${Math.round(memUsage.rss/1024/1024)}MB\n`);
       
+      // CRITICAL: Log to external system IMMEDIATELY
+      try {
+        const payload = {
+          timestamp: new Date().toISOString(),
+          event: 'SIGTERM_RECEIVED',
+          pid: process.pid,
+          uptime: Math.floor(uptime),
+          uptimeMinutes,
+          memory: Math.round(memUsage.rss / 1024 / 1024),
+          renderService: process.env.RENDER_SERVICE_ID
+        };
+        console.log('📡 EXTERNAL_LOG: SIGTERM_RECEIVED', payload);
+        
+        // TODO: Send to webhook.site or similar external service
+        // fetch('https://webhook.site/your-url', { method: 'POST', body: JSON.stringify(payload) });
+      } catch (extError) {
+        console.log(`❌ External SIGTERM log failed: ${extError.message}`);
+      }
+      
       // Enhanced logging with Render-specific analysis
       logger.error('🚨 SIGTERM RECEIVED - Render.com Analysis', {
         signal: 'SIGTERM',
@@ -387,16 +406,53 @@ class TelegramDepositBot {
       lastAliveCheck = now;
     }, 15000); // Check every 15 seconds
     
-    // Additional Render.com specific signals
-    process.on('SIGHUP', () => {
-      logger.error('📤 SIGHUP received - Process restart signal', {
+    // COMPLETE SIGNAL DETECTION MATRIX
+    const logSignal = (signalName, reason) => {
+      console.log(`\n📤 ${signalName} RECEIVED`);
+      process.stdout.write(`\n📤 ${signalName} - PID ${process.pid} - ${Math.floor(process.uptime())}s\n`);
+      
+      // External log
+      try {
+        console.log(`📡 EXTERNAL_LOG: ${signalName}_RECEIVED`, {
+          timestamp: new Date().toISOString(),
+          signal: signalName,
+          pid: process.pid,
+          uptime: Math.floor(process.uptime()),
+          reason
+        });
+      } catch (e) {
+        console.log(`❌ External ${signalName} log failed`);
+      }
+      
+      logger.error(`📤 ${signalName} received`, {
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         pid: process.pid,
-        reason: 'SIGHUP - process restart requested'
+        reason
       });
+    };
+
+    process.on('SIGHUP', () => {
+      logSignal('SIGHUP', 'Process restart signal');
       this.shutdown('SIGHUP');
     });
+    
+    process.on('SIGUSR1', () => {
+      logSignal('SIGUSR1', 'User-defined signal 1');
+      this.shutdown('SIGUSR1');
+    });
+    
+    process.on('SIGUSR2', () => {
+      logSignal('SIGUSR2', 'User-defined signal 2');  
+      this.shutdown('SIGUSR2');
+    });
+    
+    process.on('SIGQUIT', () => {
+      logSignal('SIGQUIT', 'Quit signal');
+      this.shutdown('SIGQUIT');
+    });
+    
+    // Note: SIGKILL cannot be caught, but we'll detect disappearance
     
     // Memory/resource warnings
     process.on('warning', (warning) => {
@@ -760,8 +816,39 @@ class TelegramDepositBot {
         logger.info(`   📊 ${config.owners.length} owner(s) configured`);
       });
       
-      // Setup aggressive resource monitoring for Render.com
-      setInterval(() => {
+      // EXTERNAL MONITORING - Send data outside Render ecosystem
+      const externalLog = async (event, data) => {
+        try {
+          const payload = {
+            timestamp: new Date().toISOString(),
+            event,
+            pid: process.pid,
+            uptime: Math.floor(process.uptime()),
+            ...data
+          };
+          
+          // Send to webhook.site for external logging (replace with actual URL)
+          // await fetch('https://webhook.site/your-unique-url', {
+          //   method: 'POST',
+          //   headers: { 'Content-Type': 'application/json' },
+          //   body: JSON.stringify(payload),
+          //   timeout: 5000
+          // });
+          
+          console.log(`📡 EXTERNAL_LOG: ${event}`, payload);
+        } catch (error) {
+          console.log(`❌ External log failed: ${error.message}`);
+        }
+      };
+      
+      // Log startup to external system
+      externalLog('PROCESS_START', {
+        serviceId: process.env.RENDER_SERVICE_ID,
+        renderRegion: process.env.RENDER_SERVICE_REGION
+      });
+      
+      // Setup aggressive resource monitoring for Render.com + External logging
+      setInterval(async () => {
         try {
           // Get memory and CPU usage
           const memUsage = process.memoryUsage();
@@ -797,6 +884,15 @@ class TelegramDepositBot {
             global.gc();
           }
           
+          // Log to external system every cycle
+          externalLog('HEARTBEAT', {
+            memory: {
+              rss: rssInMB,
+              heapUsed: heapUsedMB
+            },
+            memoryStatus: memoryWarning.includes('HIGH') ? 'HIGH' : memoryWarning.includes('WARNING') ? 'WARNING' : 'OK'
+          });
+
           // Enhanced keep-alive for Render.com
           fetch(`http://localhost:${config.port}/ping`, {
             timeout: 2000,
