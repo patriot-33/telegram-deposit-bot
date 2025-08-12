@@ -65,46 +65,57 @@ class WebhookController {
         });
       }
       
-      // 3. Get click data from Keitaro
-      let clickData = await keitaroService.getClickById(postbackData.subid);
+      // 3. Get click data from Keitaro reports
+      const clickData = await keitaroService.getClickById(postbackData.subid);
       
-      // TEMPORARY: If click not found, create test data for FB source
       if (!clickData) {
-        logger.warn('⚠️ Click not found in Keitaro, using test data', {
+        logger.warn('⚠️ Click not found in Keitaro reports', {
           requestId,
           subid: postbackData.subid
         });
         
-        // Create test click data with FB source ID
-        clickData = {
-          sub_id_1: postbackData.subid,
-          sub_id_2: 'test_sub2',
-          sub_id_4: 'test_creative',
-          traffic_source_id: 3, // MNSTR Apps (FB source)
-          campaign_id: 1,
-          offer_id: 1,
-          country: postbackData.geo || 'US'
-        };
-        
-        logger.info('🧪 Using test click data', {
-          requestId,
-          trafficSourceId: clickData.traffic_source_id,
-          subid: postbackData.subid
+        return WebhookController._sendResponse(res, 200, {
+          message: 'Postback ignored - click not found in Keitaro',
+          subid: postbackData.subid,
+          requestId
         });
       }
       
+      logger.info('✅ Real click data retrieved from Keitaro', {
+        requestId,
+        subid: postbackData.subid,
+        trafficSourceId: clickData.traffic_source_id,
+        trafficSourceName: clickData.traffic_source_name,
+        country: clickData.country,
+        campaignName: clickData.campaign_name,
+        offerName: clickData.offer_name
+      });
+      
       // 4. Check if traffic source is FB
-      const isFBSource = trafficSourceService.isFBSource(clickData.traffic_source_id);
+      const trafficSourceId = clickData.traffic_source_id;
+      const trafficSourceName = clickData.traffic_source_name;
+      const isFBSource = trafficSourceService.isFBSource(trafficSourceId);
+      
+      logger.info('🔍 Traffic source validation', {
+        requestId,
+        trafficSourceId,
+        trafficSourceName,
+        isFBSource,
+        subid: postbackData.subid
+      });
+      
       if (!isFBSource) {
         logger.info('⏭️ Ignoring postback - non-FB source', {
           requestId,
-          trafficSourceId: clickData.traffic_source_id,
+          trafficSourceId,
+          trafficSourceName,
           subid: postbackData.subid
         });
         
         return WebhookController._sendResponse(res, 200, {
           message: 'Postback ignored - non-FB source',
-          trafficSourceId: clickData.traffic_source_id,
+          trafficSourceId,
+          trafficSourceName,
           requestId
         });
       }
@@ -205,51 +216,55 @@ class WebhookController {
   }
   
   /**
-   * Enrich deposit data with additional information from Keitaro
+   * Enrich deposit data with information from Keitaro reports
    */
   static async _enrichDepositData(postbackData, clickData) {
     try {
-      // Get campaign data
-      const campaignData = await keitaroService.getCampaignById(clickData.campaign_id);
-      
-      // Get offer data
-      const offerData = await keitaroService.getOfferById(clickData.offer_id);
-      
-      // Get traffic source name
-      const trafficSourceName = trafficSourceService.getSourceName(clickData.traffic_source_id);
+      logger.info('🔄 Enriching deposit data with real Keitaro data', {
+        subid: postbackData.subid,
+        clickDataFields: Object.keys(clickData || {})
+      });
       
       return {
-        // Postback data
+        // ID баера (из Sub ID 1 в Keitaro)
         subid1: clickData.sub_id_1 || 'N/A',
-        geo: postbackData.geo || clickData.country || 'N/A',
-        payout: postbackData.payout || 0,
         
-        // Keitaro data
-        traffic_source_name: trafficSourceName,
-        offer_name: offerData?.name || 'N/A',
-        campaign_name: campaignData?.name || 'N/A',
+        // ГЕО (из country в Keitaro, не из postback)
+        geo: clickData.country || postbackData.geo || 'N/A',
+        
+        // Доход (из postback)
+        payout: postbackData.payout || clickData.revenue || 0,
+        
+        // Реальные данные из Keitaro reports
+        traffic_source_name: clickData.traffic_source_name || trafficSourceService.getSourceName(clickData.traffic_source_id) || 'N/A',
+        offer_name: clickData.offer_name || 'N/A',
+        campaign_name: clickData.campaign_name || 'N/A',
         subid2: clickData.sub_id_2 || 'N/A',
         subid4: clickData.sub_id_4 || 'N/A', // Creative
         
         // System data
         timestamp: new Date().toISOString(),
-        traffic_source_id: clickData.traffic_source_id
+        traffic_source_id: clickData.traffic_source_id,
+        
+        // Debug info
+        clickId: postbackData.subid,
+        rawClickData: clickData
       };
     } catch (error) {
       logger.warn('Failed to enrich deposit data', { error: error.message });
       
       // Return minimal data if enrichment fails
       return {
-        subid1: clickData.sub_id_1 || 'N/A',
-        geo: postbackData.geo || 'N/A',
+        subid1: clickData?.sub_id_1 || 'N/A',
+        geo: clickData?.country || postbackData.geo || 'N/A', 
         payout: postbackData.payout || 0,
-        traffic_source_name: trafficSourceService.getSourceName(clickData.traffic_source_id),
-        offer_name: 'N/A',
-        campaign_name: 'N/A',
-        subid2: clickData.sub_id_2 || 'N/A',
-        subid4: clickData.sub_id_4 || 'N/A',
+        traffic_source_name: clickData?.traffic_source_name || 'N/A',
+        offer_name: clickData?.offer_name || 'N/A',
+        campaign_name: clickData?.campaign_name || 'N/A',
+        subid2: clickData?.sub_id_2 || 'N/A',
+        subid4: clickData?.sub_id_4 || 'N/A',
         timestamp: new Date().toISOString(),
-        traffic_source_id: clickData.traffic_source_id
+        traffic_source_id: clickData?.traffic_source_id || 0
       };
     }
   }

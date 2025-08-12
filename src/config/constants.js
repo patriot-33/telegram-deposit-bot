@@ -54,17 +54,18 @@ const POSTBACK_STATUS = {
 
 // Telegram Message Templates
 const MESSAGE_TEMPLATES = {
-  DEPOSIT_NOTIFICATION: `Ура, пришел деп! 🥳
+  DEPOSIT_NOTIFICATION: `🥳 <b>Новый депозит!</b>
 
-Источник: FB
-ID баера: {subid1}
-ГЕО: {geo}
-Источник в КТ: {traffic_source_name}
-Оффер: {offer_name}
-Кампания: {campaign_name}
-Subid2: {subid2}
-Креатив: {subid4}
-Доход: {payout}`,
+💰 <b>Доход:</b> {payout}
+🆔 <b>ID баера:</b> {subid1}
+🌍 <b>ГЕО:</b> {geo}
+
+📊 <b>Детали:</b>
+🎯 Оффер: {offer_name}
+📈 Кампания: {campaign_name}
+🔗 Источник: {traffic_source_name}
+🎨 Креатив: {subid4}
+📋 SubID2: {subid2}`,
 
   ERROR_NOTIFICATION: `⚠️ Ошибка обработки постбека
 Время: {timestamp}

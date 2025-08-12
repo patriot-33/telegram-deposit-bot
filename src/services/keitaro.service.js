@@ -64,41 +64,69 @@ class KeitaroService {
   }
   
   /**
-   * Get click data by ID
-   * Core method for postback processing
+   * Get click data by ID using reports endpoint
+   * Keitaro doesn't have a direct /clicks/{id} endpoint, we need to use reports
    */
   async getClickById(clickId) {
     try {
-      const fullUrl = `${this.client.defaults.baseURL}${API_CONFIG.KEITARO.ENDPOINTS.CLICKS}/${clickId}`;
-      logger.info('🔍 Getting click data', { 
-        clickId, 
-        baseURL: this.client.defaults.baseURL,
-        endpoint: API_CONFIG.KEITARO.ENDPOINTS.CLICKS,
-        fullUrl 
+      logger.info('🔍 Getting click data via reports endpoint', { clickId });
+      
+      // Use reports endpoint to search for click by subid
+      const response = await this.client.get('/reports/build', {
+        params: {
+          range: 'today',  // Search today's data
+          timezone: 'UTC',
+          grouping: ['subid'],
+          filters: [
+            {
+              name: 'subid',
+              operator: 'EQUALS',
+              expression: clickId
+            }
+          ],
+          columns: [
+            'subid', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4',
+            'campaign_id', 'campaign_name', 'offer_id', 'offer_name', 
+            'traffic_source_id', 'traffic_source_name', 
+            'country', 'clicks', 'leads', 'sales', 'revenue'
+          ],
+          limit: 1
+        }
       });
       
-      const response = await this.client.get(`${API_CONFIG.KEITARO.ENDPOINTS.CLICKS}/${clickId}`);
-      
-      if (!response.data) {
-        logger.warn('Click not found', { clickId });
+      const rows = response.data?.rows;
+      if (!rows || rows.length === 0) {
+        logger.warn('Click not found in Keitaro reports', { clickId });
         return null;
       }
       
-      logger.info('✅ Click data retrieved', {
-        clickId,
-        campaignId: response.data.campaign_id,
-        trafficSourceId: response.data.traffic_source_id,
-        offerId: response.data.offer_id
+      // Parse the first (and should be only) row
+      const clickData = rows[0];
+      const columns = response.data.columns;
+      
+      // Map column indices to values
+      const result = {};
+      columns.forEach((column, index) => {
+        result[column] = clickData[index];
       });
       
-      return response.data;
+      logger.info('✅ Click data retrieved via reports', {
+        clickId,
+        campaignId: result.campaign_id,
+        trafficSourceId: result.traffic_source_id,
+        offerId: result.offer_id,
+        country: result.country,
+        revenue: result.revenue
+      });
+      
+      return result;
     } catch (error) {
       if (error.response?.status === 404) {
-        logger.warn('Click not found in Keitaro', { clickId });
+        logger.warn('Click not found in Keitaro reports', { clickId });
         return null;
       }
       
-      logger.error('Failed to get click data', {
+      logger.error('Failed to get click data via reports', {
         clickId,
         error: error.message,
         status: error.response?.status
