@@ -154,6 +154,8 @@ class TelegramDepositBot {
     this.app.get('/admin/stats', this.getStats.bind(this));
     this.app.get('/admin/test', this.testServices.bind(this));
     this.app.post('/admin/test-notification', this.testNotification.bind(this));
+    this.app.post('/admin/setup-webhook', this.setupWebhook.bind(this));
+    this.app.get('/admin/webhook-info', this.getWebhookInfo.bind(this));
     
     // Traffic sources info endpoint
     this.app.get('/admin/traffic-sources', this.getTrafficSources.bind(this));
@@ -375,6 +377,98 @@ class TelegramDepositBot {
   }
   
   /**
+   * Setup Telegram webhook manually
+   */
+  async setupWebhook(req, res) {
+    try {
+      logger.info('🔧 Manual webhook setup requested');
+      
+      const webhookUrl = config.bot.webhookUrl;
+      if (!webhookUrl) {
+        return res.status(400).json({
+          error: 'Webhook URL not configured',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Set webhook using direct API call
+      const response = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/setWebhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: webhookUrl,
+          drop_pending_updates: true
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.ok) {
+        logger.info('✅ Webhook setup successful', { url: webhookUrl });
+        res.json({
+          success: true,
+          message: 'Webhook setup successful',
+          url: webhookUrl,
+          result: result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        logger.error('❌ Webhook setup failed', { error: result });
+        res.status(500).json({
+          success: false,
+          error: 'Webhook setup failed',
+          details: result,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Error setting up webhook', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Get webhook information
+   */
+  async getWebhookInfo(req, res) {
+    try {
+      logger.info('🔍 Getting webhook info');
+      
+      // Get webhook info using direct API call
+      const response = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/getWebhookInfo`);
+      const result = await response.json();
+      
+      if (result.ok) {
+        res.json({
+          success: true,
+          webhookInfo: result.result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get webhook info',
+          details: result,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Error getting webhook info', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
    * Get traffic sources information
    */
   async getTrafficSources(req, res) {
@@ -431,9 +525,12 @@ class TelegramDepositBot {
         logger.info('   GET  /health               - Health check');
         logger.info('   GET  /postback             - Postback webhook');
         logger.info('   POST /postback             - Postback webhook');
+        logger.info('   POST /telegram/webhook     - Telegram webhook');
         logger.info('   GET  /admin/stats          - Application statistics');
         logger.info('   GET  /admin/test           - Service health test');
         logger.info('   POST /admin/test-notification - Test Telegram notification');
+        logger.info('   POST /admin/setup-webhook  - Setup Telegram webhook manually');
+        logger.info('   GET  /admin/webhook-info   - Get current webhook info');
         logger.info('   GET  /admin/traffic-sources - Traffic sources info');
         logger.info('');
         logger.info('🤖 Telegram Bot Features:');
