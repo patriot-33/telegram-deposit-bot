@@ -31,8 +31,8 @@ const TRAFFIC_SOURCES = {
 
 // Postback Status Configuration
 const POSTBACK_STATUS = {
-  VALID_STATUSES: ['sale'],
-  IGNORE_STATUSES: ['lead', 'click', 'impression']
+  VALID_STATUSES: ['sale', 'dep', 'deposit'],
+  IGNORE_STATUSES: ['lead', 'click', 'impression', 'reg', 'registration']
 };
 
 // Telegram Message Templates
