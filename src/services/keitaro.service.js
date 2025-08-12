@@ -16,7 +16,7 @@ class KeitaroService {
     
     // Create axios instance with default configuration
     this.client = axios.create({
-      baseURL: this.baseUrl,
+      baseURL: this.baseUrl + '/admin_api/v1',
       timeout: this.timeout,
       headers: {
         'Api-Key': this.apiKey,

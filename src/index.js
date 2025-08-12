@@ -39,6 +39,9 @@ class TelegramDepositBot {
    * Setup Express middleware
    */
   setupMiddleware() {
+    // Trust proxy (for Render.com and other reverse proxies)
+    this.app.set('trust proxy', 1);
+    
     // Security middleware
     this.app.use(helmet({
       contentSecurityPolicy: false, // Disable for API-only server

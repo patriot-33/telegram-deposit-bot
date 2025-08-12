@@ -30,6 +30,19 @@ class TelegramBotService {
         return true;
       }
       
+      // Delete any existing webhook to avoid conflicts
+      try {
+        const webhookInfo = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/getWebhookInfo`);
+        const webhookData = await webhookInfo.json();
+        
+        if (webhookData.result && webhookData.result.url) {
+          logger.info('Removing existing webhook', { url: webhookData.result.url });
+          await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/deleteWebhook`);
+        }
+      } catch (error) {
+        logger.warn('Failed to check/remove webhook', { error: error.message });
+      }
+      
       const options = {
         polling: config.bot.pollingEnabled,
         webHook: config.bot.webhookMode,

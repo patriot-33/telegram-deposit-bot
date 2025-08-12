@@ -64,10 +64,10 @@ Subid: {subid}`,
 const API_CONFIG = {
   KEITARO: {
     ENDPOINTS: {
-      CLICKS: '/admin_api/v1/clicks',
-      CAMPAIGNS: '/admin_api/v1/campaigns',
-      OFFERS: '/admin_api/v1/offers',
-      TRAFFIC_SOURCES: '/admin_api/v1/traffic_sources'
+      CLICKS: '/clicks',
+      CAMPAIGNS: '/campaigns',
+      OFFERS: '/offers',
+      TRAFFIC_SOURCES: '/traffic_sources'
     },
     TIMEOUT: 10000,
     RETRY_ATTEMPTS: 3,
