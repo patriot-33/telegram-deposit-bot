@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: telegram-deposit-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: TELEGRAM_BOT_TOKEN
+        value: 8388286726:AAEOdmeuTksTn-UYbSK3Goom5B0rwib_de0
+      - key: TELEGRAM_CHAT_ID
+        sync: false  # Вы укажете в Render dashboard
+      - key: KEITARO_BASE_URL
+        value: https://keitaro.familyteam.top
+      - key: KEITARO_API_KEY
+        value: 5743b46976d8103d1a72270e7d401cde
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_FILE_ENABLED
+        value: false
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100

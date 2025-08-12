@@ -1,0 +1,425 @@
+/**
+ * Main Application Entry Point
+ * Senior PM: Production-ready Express server with comprehensive middleware
+ */
+
+const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+
+// Import configuration and utilities
+const config = require('./config/config');
+const logger = require('./utils/logger');
+const WebhookController = require('./controllers/webhook.controller');
+const trafficSourceService = require('./services/trafficSource.service');
+
+// Import services for health checks
+const keitaroService = require('./services/keitaro.service');
+const telegramService = require('./services/telegram.service');
+
+class TelegramDepositBot {
+  constructor() {
+    this.app = express();
+    this.server = null;
+    this.startTime = Date.now();
+    this.processedDeposits = 0;
+    this.lastActivity = null;
+    
+    this.setupMiddleware();
+    this.setupRoutes();
+    this.setupErrorHandling();
+  }
+  
+  /**
+   * Setup Express middleware
+   */
+  setupMiddleware() {
+    // Security middleware
+    this.app.use(helmet({
+      contentSecurityPolicy: false, // Disable for API-only server
+      crossOriginEmbedderPolicy: false
+    }));
+    
+    // CORS middleware
+    this.app.use(cors({
+      origin: config.env === 'production' ? false : true,
+      credentials: false
+    }));
+    
+    // Rate limiting
+    const limiter = rateLimit({
+      windowMs: config.security.rateLimit.windowMs,
+      max: config.security.rateLimit.max,
+      message: {
+        error: 'Too many requests',
+        message: 'Rate limit exceeded'
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skip: (req) => {
+        // Skip rate limiting for health checks
+        return req.path === '/health' || req.path === '/';
+      }
+    });
+    
+    this.app.use(limiter);
+    
+    // Body parsing middleware
+    this.app.use(express.json({ limit: '1mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+    
+    // Request logging middleware
+    this.app.use((req, res, next) => {
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      req.requestId = requestId;
+      
+      logger.info('📥 Incoming request', {
+        requestId,
+        method: req.method,
+        url: req.url,
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        contentLength: req.get('Content-Length') || 0
+      });
+      
+      // Track last activity
+      this.lastActivity = new Date().toISOString();
+      
+      next();
+    });
+  }
+  
+  /**
+   * Setup application routes
+   */
+  setupRoutes() {
+    // Root endpoint
+    this.app.get('/', (req, res) => {
+      res.json({
+        name: 'Telegram Deposit Bot',
+        version: '1.0.0',
+        status: 'running',
+        uptime: Math.floor((Date.now() - this.startTime) / 1000),
+        environment: config.env,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // Health check endpoint
+    this.app.get('/health', WebhookController.healthCheck);
+    
+    // Postback webhook endpoint
+    this.app.get('/postback', WebhookController.processPostback);
+    this.app.post('/postback', WebhookController.processPostback);
+    
+    // Admin endpoints (for monitoring)
+    this.app.get('/admin/stats', this.getStats.bind(this));
+    this.app.get('/admin/test', this.testServices.bind(this));
+    this.app.post('/admin/test-notification', this.testNotification.bind(this));
+    
+    // Traffic sources info endpoint
+    this.app.get('/admin/traffic-sources', this.getTrafficSources.bind(this));
+    
+    // 404 handler
+    this.app.use('*', (req, res) => {
+      logger.warn('📍 Route not found', {
+        method: req.method,
+        url: req.url,
+        ip: req.ip
+      });
+      
+      res.status(404).json({
+        error: 'Route not found',
+        method: req.method,
+        url: req.url,
+        timestamp: new Date().toISOString()
+      });
+    });
+  }
+  
+  /**
+   * Setup error handling
+   */
+  setupErrorHandling() {
+    // Global error handler
+    this.app.use((error, req, res, next) => {
+      logger.error('💥 Unhandled application error', {
+        requestId: req.requestId,
+        error: error.message,
+        stack: error.stack,
+        url: req.url,
+        method: req.method
+      });
+      
+      res.status(500).json({
+        error: 'Internal server error',
+        requestId: req.requestId,
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // Process error handlers
+    process.on('uncaughtException', (error) => {
+      logger.error('🚨 Uncaught Exception', {
+        error: error.message,
+        stack: error.stack
+      });
+      
+      // Graceful shutdown
+      this.shutdown('uncaughtException');
+    });
+    
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('🚨 Unhandled Rejection', {
+        reason,
+        promise
+      });
+      
+      // Graceful shutdown
+      this.shutdown('unhandledRejection');
+    });
+    
+    // Graceful shutdown signals
+    process.on('SIGTERM', () => {
+      logger.info('📤 SIGTERM received');
+      this.shutdown('SIGTERM');
+    });
+    
+    process.on('SIGINT', () => {
+      logger.info('📤 SIGINT received');
+      this.shutdown('SIGINT');
+    });
+  }
+  
+  /**
+   * Get application statistics
+   */
+  async getStats(req, res) {
+    try {
+      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+      const trafficSourceStats = trafficSourceService.getStatistics();
+      
+      const stats = {
+        application: {
+          name: 'Telegram Deposit Bot',
+          version: '1.0.0',
+          environment: config.env,
+          uptime,
+          startTime: new Date(this.startTime).toISOString(),
+          processedDeposits: this.processedDeposits,
+          lastActivity: this.lastActivity
+        },
+        trafficSources: trafficSourceStats,
+        system: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          architecture: process.arch,
+          memory: process.memoryUsage(),
+          pid: process.pid
+        }
+      };
+      
+      res.json(stats);
+    } catch (error) {
+      logger.error('Error getting stats', { error: error.message });
+      res.status(500).json({
+        error: 'Failed to get statistics',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Test all services
+   */
+  async testServices(req, res) {
+    try {
+      logger.info('🧪 Testing all services');
+      
+      const results = {
+        keitaro: await keitaroService.checkHealth(),
+        telegram: await telegramService.checkHealth(),
+        trafficSources: trafficSourceService.validateConfiguration()
+      };
+      
+      const allHealthy = results.keitaro.healthy && 
+                        results.telegram.healthy && 
+                        results.trafficSources.valid;
+      
+      res.status(allHealthy ? 200 : 503).json({
+        status: allHealthy ? 'healthy' : 'unhealthy',
+        services: results,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Error testing services', { error: error.message });
+      res.status(500).json({
+        error: 'Service test failed',
+        message: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Test notification sending
+   */
+  async testNotification(req, res) {
+    try {
+      logger.info('🧪 Sending test notification');
+      
+      const result = await telegramService.sendTestMessage();
+      
+      if (result.success) {
+        res.json({
+          success: true,
+          message: 'Test notification sent',
+          messageId: result.messageId,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: result.error,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      logger.error('Error sending test notification', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Get traffic sources information
+   */
+  async getTrafficSources(req, res) {
+    try {
+      const stats = trafficSourceService.getStatistics();
+      res.json({
+        ...stats,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Error getting traffic sources', { error: error.message });
+      res.status(500).json({
+        error: 'Failed to get traffic sources',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Start the server
+   */
+  async start() {
+    try {
+      // Validate configuration
+      config.validateConfig();
+      
+      // Validate traffic sources configuration
+      const trafficSourceValidation = trafficSourceService.validateConfiguration();
+      if (!trafficSourceValidation.valid) {
+        throw new Error(`Traffic source configuration invalid: ${trafficSourceValidation.error}`);
+      }
+      
+      // Start server
+      this.server = this.app.listen(config.port, () => {
+        logger.info('🚀 Telegram Deposit Bot started successfully', {
+          port: config.port,
+          environment: config.env,
+          pid: process.pid,
+          version: '1.0.0',
+          fbSources: trafficSourceValidation.stats.fbSourcesCount,
+          nonFbSources: trafficSourceValidation.stats.nonFbSourcesCount
+        });
+        
+        logger.info('📋 Available endpoints:');
+        logger.info('   GET  /                      - API information');
+        logger.info('   GET  /health               - Health check');
+        logger.info('   GET  /postback             - Postback webhook');
+        logger.info('   POST /postback             - Postback webhook');
+        logger.info('   GET  /admin/stats          - Application statistics');
+        logger.info('   GET  /admin/test           - Service health test');
+        logger.info('   POST /admin/test-notification - Test Telegram notification');
+        logger.info('   GET  /admin/traffic-sources - Traffic sources info');
+      });
+      
+      // Test services on startup
+      setTimeout(async () => {
+        try {
+          const keitaroHealth = await keitaroService.checkHealth();
+          const telegramHealth = await telegramService.checkHealth();
+          
+          if (keitaroHealth.healthy && telegramHealth.healthy) {
+            logger.info('✅ All services are healthy and ready');
+            
+            // Send startup notification
+            await telegramService.sendTestMessage();
+            logger.info('📱 Startup notification sent to Telegram');
+          } else {
+            logger.warn('⚠️ Some services are not healthy:');
+            logger.warn(`   Keitaro: ${keitaroHealth.healthy ? '✅' : '❌'}`);
+            logger.warn(`   Telegram: ${telegramHealth.healthy ? '✅' : '❌'}`);
+          }
+        } catch (error) {
+          logger.error('Startup health check failed', { error: error.message });
+        }
+      }, 2000);
+      
+    } catch (error) {
+      logger.error('💥 Failed to start server', {
+        error: error.message,
+        stack: error.stack
+      });
+      process.exit(1);
+    }
+  }
+  
+  /**
+   * Graceful shutdown
+   */
+  async shutdown(signal) {
+    logger.info(`📤 Starting graceful shutdown (${signal})`);
+    
+    if (this.server) {
+      this.server.close(() => {
+        logger.info('✅ HTTP server closed');
+        
+        // Send shutdown notification
+        telegramService.sendSystemStatus({
+          uptime: Math.floor((Date.now() - this.startTime) / 1000),
+          processed_deposits: this.processedDeposits,
+          last_activity: this.lastActivity || 'No activity'
+        }).finally(() => {
+          logger.info('👋 Graceful shutdown completed');
+          process.exit(0);
+        });
+      });
+      
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        logger.warn('⚠️ Force shutdown - timeout reached');
+        process.exit(1);
+      }, 10000);
+    } else {
+      process.exit(0);
+    }
+  }
+}
+
+// Create and start application
+const app = new TelegramDepositBot();
+
+// Start server if this file is run directly
+if (require.main === module) {
+  app.start();
+}
+
+module.exports = app;
