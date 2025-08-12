@@ -30,43 +30,19 @@ class TelegramBotService {
         return true;
       }
       
-      // AGGRESSIVE cleanup to stop all conflicting bot instances
-      try {
-        logger.info('🔧 AGGRESSIVE cleanup of Telegram bot conflicts...');
+      // Clean initialization for webhook mode
+      if (config.bot.webhookMode) {
+        logger.info('🔧 Initializing webhook mode...');
         
-        // Step 1: Force webhook to disable all polling instances
-        logger.info('Step 1: Setting temporary webhook to stop polling conflicts');
-        const setWebhook = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/setWebhook`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: 'https://httpbin.org/post',  // Temporary dummy webhook
-            drop_pending_updates: true
-          })
-        });
-        const setResult = await setWebhook.json();
-        logger.info('Temporary webhook set', { success: setResult.ok });
-        
-        // Step 2: Wait for all polling to stop
-        logger.info('Step 2: Waiting for polling instances to stop...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Step 3: Delete webhook to enable polling
-        logger.info('Step 3: Deleting webhook to enable polling');
-        const deleteWebhook = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/deleteWebhook?drop_pending_updates=true`, {
-          method: 'POST'
-        });
-        const deleteResult = await deleteWebhook.json();
-        logger.info('Webhook deleted', { success: deleteResult.ok });
-        
-        // Step 4: Final wait before starting polling
-        logger.info('Step 4: Final cleanup delay...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        logger.info('✅ AGGRESSIVE cleanup completed');
-        
-      } catch (error) {
-        logger.warn('Failed to cleanup bot state', { error: error.message });
+        // Clear any existing polling conflicts for webhook mode
+        try {
+          await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/deleteWebhook?drop_pending_updates=true`, {
+            method: 'POST'
+          });
+          logger.info('✅ Cleared any existing webhooks/polling conflicts');
+        } catch (error) {
+          logger.warn('Failed to clear existing webhooks', { error: error.message });
+        }
       }
       
       const options = {

@@ -540,6 +540,13 @@ class TelegramDepositBot {
         logger.info(`   📊 ${config.owners.length} owner(s) configured`);
       });
       
+      // Setup keep-alive ping for Render.com free tier
+      setInterval(() => {
+        // Self-ping to prevent hibernation on Render free tier
+        fetch(`http://localhost:${config.port}/health`)
+          .catch(() => {}); // Ignore errors, just keep alive
+      }, 12 * 60 * 1000); // Every 12 minutes
+      
       // Test services on startup
       setTimeout(async () => {
         try {
