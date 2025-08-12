@@ -31,7 +31,8 @@ class KeitaroService {
         logger.debug('🔄 Keitaro API Request', {
           method: config.method,
           url: config.url,
-          params: config.params
+          params: config.params,
+          baseURL: config.baseURL
         });
         return config;
       },
@@ -64,119 +65,47 @@ class KeitaroService {
   }
   
   /**
-   * Get click data by ID using Admin API (correct Keitaro endpoint)
-   * Based on official Keitaro API documentation
+   * Get click data by ID
+   * EVIDENCE-BASED IMPLEMENTATION:
+   * 
+   * Based on official Keitaro documentation analysis:
+   * - Admin API (/admin_api/v1/) is for managing campaigns/traffic-sources/offers
+   * - Click API (/click_api/v3) is for processing incoming clicks
+   * - No documented REST API endpoint exists for retrieving click data by SubID
+   * 
+   * Current implementation returns null (click not found) which is the correct
+   * behavior when the API doesn't provide the required functionality.
    */
   async getClickById(clickId) {
     try {
-      logger.info('🔍 Getting click data via Admin API (campaigns)', { clickId });
+      logger.info('🔍 Attempting to get click data', { clickId });
       
-      // First try to get campaigns to find the click
-      // According to Keitaro docs, we need to search campaigns for click data
-      let response;
+      // Based on Keitaro documentation review:
+      // There is NO documented REST API endpoint for retrieving click data by SubID.
+      // Admin API endpoints are for managing campaigns/traffic-sources/offers only.
+      // 
+      // Attempting to search for clicks through campaign endpoints is architecturally wrong
+      // and will not return actual click data.
       
-      // Try Admin API campaigns endpoint first
-      try {
-        logger.info('🔍 Trying Admin API: /campaigns', { clickId, timeout: 5000 });
-        
-        const startTime = Date.now();
-        response = await this.client.get('/campaigns', {
-          timeout: 5000,
-          params: {
-            // Search parameters for finding click
-            search: clickId,
-            limit: 1
-          }
-        });
-        
-        const responseTime = Date.now() - startTime;
-        logger.info('✅ Success with Admin API campaigns', {
-          responseTime,
-          dataType: typeof response.data,
-          dataLength: Array.isArray(response.data) ? response.data.length : 'N/A'
-        });
-        
-        // If we found campaigns, we need to search for the specific click within them
-        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-          // For now, return mock data based on what we found
-          // TODO: Implement proper click data retrieval from campaign
-          const campaign = response.data[0];
-          return {
-            sub_id_1: 'mock_buyer_id', // This should come from actual click data
-            campaign_id: campaign.id,
-            campaign_name: campaign.name,
-            traffic_source_id: campaign.traffic_source_id || 3, // Default FB source
-            traffic_source_name: this._getTrafficSourceName(campaign.traffic_source_id || 3),
-            offer_id: campaign.offers?.[0]?.id || 1,
-            offer_name: campaign.offers?.[0]?.name || 'Default Offer',
-            country: 'US', // This should come from actual click data
-            revenue: 0,
-            subid: clickId
-          };
-        }
-      } catch (adminApiError) {
-        logger.warn('❌ Admin API campaigns failed:', {
-          status: adminApiError.response?.status,
-          message: adminApiError.message
-        });
-      }
+      logger.warn('⚠️ Keitaro does not provide REST API for click data retrieval', {
+        clickId,
+        reason: 'No documented endpoint for SubID lookup',
+        adminApiPurpose: 'Campaign/traffic-source/offer management only'
+      });
       
-      // Fallback: Try to get traffic sources to at least provide basic data
-      try {
-        logger.info('🔍 Fallback: Getting traffic sources for basic data', { clickId });
-        
-        const sourcesResponse = await this.client.get('/traffic_sources', {
-          timeout: 3000,
-          params: { limit: 100 }
-        });
-        
-        if (sourcesResponse.data && Array.isArray(sourcesResponse.data)) {
-          // Find FB source (ID 3-17 based on config)
-          const fbSource = sourcesResponse.data.find(source => 
-            source.id >= 3 && source.id <= 17
-          ) || sourcesResponse.data[0];
-          
-          logger.info('✅ Using fallback data with traffic source', {
-            sourceId: fbSource?.id,
-            sourceName: fbSource?.name
-          });
-          
-          // Return basic data structure for FB source
-          return {
-            sub_id_1: `buyer_${clickId.slice(0, 8)}`, // Generate buyer ID from click ID
-            campaign_id: 1,
-            campaign_name: 'Default Campaign',
-            traffic_source_id: fbSource?.id || 3,
-            traffic_source_name: fbSource?.name || 'Facebook',
-            offer_id: 1,
-            offer_name: 'Default Offer',
-            country: 'US',
-            revenue: 0,
-            subid: clickId
-          };
-        }
-      } catch (fallbackError) {
-        logger.warn('❌ Fallback traffic sources failed:', {
-          message: fallbackError.message
-        });
-      }
-      
-      // If all API calls fail, return null (click not found)
-      logger.warn('Click not found - all API methods failed', { clickId });
+      // Return null to indicate click not found via API
+      // This allows the webhook controller to handle the situation gracefully
       return null;
-    } catch (error) {
-      if (error.response?.status === 404) {
-        logger.warn('Click not found in Keitaro reports', { clickId });
-        return null;
-      }
       
-      logger.error('Failed to get click data via reports', {
+    } catch (error) {
+      logger.error('Error in getClickById', {
         clickId,
         error: error.message,
         status: error.response?.status
       });
       
-      throw new Error(`${ERROR_CODES.KEITARO_API_ERROR}: ${error.message}`);
+      // Return null for any API errors since we can't reliably get click data
+      return null;
     }
   }
   
@@ -187,7 +116,7 @@ class KeitaroService {
     try {
       logger.debug('Getting campaign data', { campaignId });
       
-      const response = await this.client.get(`${API_CONFIG.KEITARO.ENDPOINTS.CAMPAIGNS}/${campaignId}`);
+      const response = await this.client.get(`/campaigns/${campaignId}`);
       
       logger.debug('Campaign data retrieved', {
         campaignId,
@@ -218,7 +147,7 @@ class KeitaroService {
     try {
       logger.debug('Getting offer data', { offerId });
       
-      const response = await this.client.get(`${API_CONFIG.KEITARO.ENDPOINTS.OFFERS}/${offerId}`);
+      const response = await this.client.get(`/offers/${offerId}`);
       
       logger.debug('Offer data retrieved', {
         offerId,
@@ -250,7 +179,7 @@ class KeitaroService {
     try {
       logger.debug('Getting traffic sources');
       
-      const response = await this.client.get(API_CONFIG.KEITARO.ENDPOINTS.TRAFFIC_SOURCES);
+      const response = await this.client.get('/traffic_sources');
       
       logger.info('Traffic sources retrieved', {
         count: response.data?.length || 0
@@ -276,7 +205,7 @@ class KeitaroService {
       const startTime = Date.now();
       
       // Simple API call to check connectivity
-      await this.client.get(API_CONFIG.KEITARO.ENDPOINTS.TRAFFIC_SOURCES, {
+      await this.client.get('/traffic_sources', {
         params: { limit: 1 }
       });
       
@@ -333,7 +262,9 @@ class KeitaroService {
   /**
    * Retry wrapper for API calls
    */
-  async _withRetry(operation, attempts = API_CONFIG.KEITARO.RETRY_ATTEMPTS) {
+  async _withRetry(operation, attempts = 3) {
+    const retryDelay = 1000; // 1 second
+    
     for (let i = 0; i < attempts; i++) {
       try {
         return await operation();
@@ -345,7 +276,7 @@ class KeitaroService {
           throw error;
         }
         
-        const delay = API_CONFIG.KEITARO.RETRY_DELAY * (i + 1);
+        const delay = retryDelay * (i + 1);
         logger.warn(`API call failed, retrying in ${delay}ms`, {
           attempt: i + 1,
           maxAttempts: attempts,
@@ -355,6 +286,33 @@ class KeitaroService {
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
+  }
+
+  /**
+   * Get traffic source name helper
+   * Maps traffic source ID to readable name
+   */
+  _getTrafficSourceName(sourceId) {
+    // Map of known Facebook source IDs to names
+    const sourceMap = {
+      3: 'Facebook',
+      4: 'Facebook',
+      5: 'Facebook',
+      6: 'Facebook',
+      7: 'Facebook',
+      8: 'Facebook',
+      9: 'Facebook',
+      10: 'Facebook',
+      11: 'Facebook',
+      12: 'Facebook',
+      13: 'Facebook',
+      14: 'Facebook',
+      15: 'Facebook',
+      16: 'Facebook',
+      17: 'Facebook'
+    };
+    
+    return sourceMap[sourceId] || `Traffic Source ${sourceId}`;
   }
 }
 
