@@ -1,6 +1,16 @@
 /**
  * Main Application Entry Point
  * Senior PM: Production-ready Express server with comprehensive middleware
+ * 
+ * RENDER.COM SHUTDOWN ANALYSIS SYSTEM:
+ * - Comprehensive SIGTERM logging with platform-specific analysis
+ * - Pattern detection for 10-15 minute rotation cycles
+ * - Memory usage correlation and OOM killer analysis
+ * - Activity-based shutdown hypothesis generation
+ * - Enhanced health check (<25ms response) to prevent timeouts
+ * - Dual keep-alive system (internal + external pings)
+ * - Resource monitoring with automatic garbage collection
+ * - Diagnostic recommendations for Render support tickets
  */
 
 const express = require('express');
@@ -234,12 +244,86 @@ class TelegramDepositBot {
     
     // System signal handlers with detailed logging
     process.on('SIGTERM', () => {
-      logger.error('📤 SIGTERM received - Render is terminating process', {
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
+      const memUsage = process.memoryUsage();
+      const uptime = process.uptime();
+      const uptimeMinutes = Math.floor(uptime / 60);
+      
+      // Enhanced logging with Render-specific analysis
+      logger.error('🚨 SIGTERM RECEIVED - Render.com Analysis', {
+        signal: 'SIGTERM',
+        uptime: Math.floor(uptime),
+        uptimeMinutes,
+        memory: {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+          external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+        },
         pid: process.pid,
-        reason: 'SIGTERM - likely resource limit or platform restart'
+        renderPlan: 'Starter (Paid)',
+        nodeVersion: process.version,
+        platform: process.platform,
+        env: process.env.NODE_ENV,
+        renderRegion: process.env.RENDER_SERVICE_REGION || 'unknown',
+        renderServiceId: process.env.RENDER_SERVICE_ID || 'unknown',
+        timestamp: new Date().toISOString(),
+        moscowTime: new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
+        processedDeposits: this.processedDeposits,
+        lastActivity: this.lastActivity
       });
+      
+      // Enhanced pattern analysis with Render-specific insights
+      let terminationCategory;
+      let renderAnalysis;
+      
+      if (uptime < 300) {
+        terminationCategory = '🚨 CRITICAL: Early termination (<5 min)';
+        renderAnalysis = 'Likely: startup failure, health check timeout, or deployment rollback';
+      } else if (uptime < 600) {
+        terminationCategory = '⚠️ WARNING: Short lifespan (<10 min)';
+        renderAnalysis = 'Possible: health check failures, memory spikes, or container restart policy';
+      } else if (uptime < 900) {
+        terminationCategory = '📊 INFO: Medium lifespan (10-15 min)';
+        renderAnalysis = 'Possible: rolling deployment, platform maintenance, or resource rebalancing';
+      } else if (uptime < 1800) {
+        terminationCategory = '✅ NORMAL: Acceptable lifespan (15-30 min)';
+        renderAnalysis = 'Likely: scheduled restart, rolling deployment, or routine maintenance';
+      } else {
+        terminationCategory = '✅ HEALTHY: Long lifespan (>30 min)';
+        renderAnalysis = 'Likely: planned deployment or routine platform operations';
+      }
+      
+      logger.error(terminationCategory, {
+        analysis: renderAnalysis,
+        uptimeCategory: terminationCategory.split(':')[0].trim(),
+        renderHypothesis: this._analyzeRenderShutdown(uptime, memUsage),
+        recommendedActions: this._getShutdownRecommendations(uptime, memUsage)
+      });
+      
+      // Additional diagnostics for Render platform
+      logger.error('🔍 RENDER DIAGNOSTICS', {
+        environmentVariables: {
+          renderService: !!process.env.RENDER_SERVICE_ID,
+          renderRegion: process.env.RENDER_SERVICE_REGION,
+          renderExternal: !!process.env.RENDER_EXTERNAL_URL,
+          nodeEnv: process.env.NODE_ENV,
+          port: process.env.PORT
+        },
+        systemResources: {
+          cpuUsage: process.cpuUsage(),
+          resourceUsage: process.resourceUsage ? process.resourceUsage() : 'not available',
+          loadAvg: require('os').loadavg(),
+          freeMem: `${Math.round(require('os').freemem() / 1024 / 1024)}MB`,
+          totalMem: `${Math.round(require('os').totalmem() / 1024 / 1024)}MB`
+        },
+        processInfo: {
+          argv: process.argv.slice(2), // Hide sensitive paths
+          execPath: process.execPath.split('/').pop(), // Just filename
+          title: process.title,
+          versions: process.versions
+        }
+      });
+      
       this.shutdown('SIGTERM');
     });
     
@@ -556,14 +640,53 @@ class TelegramDepositBot {
       
       // Start server
       this.server = this.app.listen(config.port, () => {
+        // Enhanced startup diagnostics for Render.com
+        const renderDiagnostics = {
+          isRender: !!process.env.RENDER_SERVICE_ID,
+          serviceId: process.env.RENDER_SERVICE_ID,
+          region: process.env.RENDER_SERVICE_REGION,
+          externalUrl: process.env.RENDER_EXTERNAL_URL,
+          port: config.port,
+          nodeEnv: config.env,
+          plan: 'Starter (Paid)', // Known from user
+          memoryLimit: '512MB', // Render Starter limit
+          currentMemory: `${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`
+        };
+        
         logger.info('🚀 Telegram Deposit Bot started successfully', {
           port: config.port,
           environment: config.env,
           pid: process.pid,
           version: '1.0.0',
           fbSources: trafficSourceValidation.stats.fbSourcesCount,
-          nonFbSources: trafficSourceValidation.stats.nonFbSourcesCount
+          nonFbSources: trafficSourceValidation.stats.nonFbSourcesCount,
+          renderDiagnostics
         });
+        
+        // Render-specific startup warnings
+        if (renderDiagnostics.isRender) {
+          logger.warn('🔍 RENDER STARTUP ANALYSIS', {
+            expectedIssues: [
+              '10-15 minute SIGTERM cycles observed on Starter plan',
+              'Health check timeouts may cause restarts',
+              'Container rotation policy may apply even on paid plans'
+            ],
+            mitigations: [
+              'Ultra-fast health check endpoint (<25ms)',
+              'Enhanced SIGTERM logging and analysis',
+              'Memory monitoring with GC triggers',
+              'Dual keep-alive mechanisms (internal + external)',
+              'Comprehensive diagnostic logging'
+            ],
+            monitoringEnabled: {
+              heartbeat: '30 seconds',
+              resourceCheck: '2 minutes',
+              memoryGC: 'when >400MB',
+              keepAlive: 'dual (internal + external)',
+              shutdownAnalysis: 'comprehensive'
+            }
+          });
+        }
         
         logger.info('📋 Available endpoints:');
         logger.info('   GET  /                      - API information');
@@ -622,9 +745,19 @@ class TelegramDepositBot {
             global.gc();
           }
           
-          // Self-ping to prevent hibernation (use fast /ping endpoint)
-          fetch(`http://localhost:${config.port}/ping`)
-            .catch(() => {}); // Ignore errors, just keep alive
+          // Enhanced keep-alive for Render.com
+          fetch(`http://localhost:${config.port}/ping`, {
+            timeout: 2000,
+            headers: { 'User-Agent': 'KeepAlive/1.0' }
+          }).catch(() => {}); // Ignore errors, just keep alive
+          
+          // Additional external keep-alive (if configured)
+          if (process.env.RENDER_EXTERNAL_URL) {
+            fetch(`${process.env.RENDER_EXTERNAL_URL}/ping`, {
+              timeout: 3000,
+              headers: { 'User-Agent': 'ExternalKeepAlive/1.0' }
+            }).catch(() => {}); // External ping to prevent idle
+          }
             
         } catch (error) {
           logger.error('Resource monitoring error', { error: error.message });
@@ -693,6 +826,72 @@ class TelegramDepositBot {
       });
       process.exit(1);
     }
+  }
+  
+  /**
+   * Analyze Render.com shutdown patterns
+   */
+  _analyzeRenderShutdown(uptime, memUsage) {
+    const uptimeMinutes = Math.floor(uptime / 60);
+    const rssInMB = Math.round(memUsage.rss / 1024 / 1024);
+    
+    // Pattern analysis based on observations
+    const patterns = [];
+    
+    // Time-based patterns
+    if (uptimeMinutes >= 10 && uptimeMinutes <= 15) {
+      patterns.push('SUSPECTED: 10-15 minute rotation policy (even on paid)');
+    }
+    
+    if (uptimeMinutes % 5 === 0) {
+      patterns.push('TIMING: Shutdown at 5-minute interval suggests scheduled operation');
+    }
+    
+    // Memory-based patterns
+    if (rssInMB < 150) {
+      patterns.push('MEMORY: Low memory usage rules out OOM killer');
+    } else if (rssInMB > 400) {
+      patterns.push('MEMORY: High memory usage might trigger container restart');
+    }
+    
+    // Activity-based patterns
+    if (!this.lastActivity) {
+      patterns.push('ACTIVITY: No recent activity recorded');
+    } else {
+      const lastActivityTime = new Date(this.lastActivity).getTime();
+      const timeSinceActivity = Date.now() - lastActivityTime;
+      if (timeSinceActivity > 5 * 60 * 1000) {
+        patterns.push('ACTIVITY: No activity in >5 minutes might trigger idle shutdown');
+      }
+    }
+    
+    return patterns.length > 0 ? patterns : ['No clear pattern detected'];
+  }
+  
+  /**
+   * Get shutdown recommendations based on analysis
+   */
+  _getShutdownRecommendations(uptime, memUsage) {
+    const uptimeMinutes = Math.floor(uptime / 60);
+    const recommendations = [];
+    
+    if (uptimeMinutes < 10) {
+      recommendations.push('Check Render service logs for startup issues');
+      recommendations.push('Verify health check endpoint responds quickly');
+      recommendations.push('Review deployment settings');
+    } else if (uptimeMinutes >= 10 && uptimeMinutes <= 15) {
+      recommendations.push('Contact Render support - unexpected behavior on paid plan');
+      recommendations.push('Consider upgrading to Standard plan');
+      recommendations.push('Implement external process monitoring');
+    } else {
+      recommendations.push('Monitor for patterns in shutdown timing');
+      recommendations.push('Check for Render platform announcements');
+    }
+    
+    recommendations.push('Enable external health monitoring service');
+    recommendations.push('Set up alerts for service downtime');
+    
+    return recommendations;
   }
   
   /**

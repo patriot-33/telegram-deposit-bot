@@ -364,53 +364,67 @@ class WebhookController {
   }
   
   /**
-   * Health check endpoint - optimized for Render.com
+   * Health check endpoint - Ultra-optimized for Render.com
    */
   static async healthCheck(req, res) {
+    // Ultra-fast health check - respond in <50ms to prevent Render timeouts
+    const startTime = Date.now();
+    
     try {
-      // Quick health check - don't check external services (too slow for Render)
-      const startTime = Date.now();
+      // Minimal health indicators
+      const uptime = Math.floor(process.uptime());
+      const rssInMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
       
-      // Just check that the process is alive and basic services work
-      const memUsage = process.memoryUsage();
-      const uptime = process.uptime();
+      // Determine status instantly
+      let status = 'healthy';
+      let warnings = [];
       
-      // Simple response for Render health checks
-      const healthStatus = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: Math.floor(uptime),
-        memory: {
-          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
-          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`
-        },
-        pid: process.pid,
-        responseTime: Date.now() - startTime
-      };
-      
-      // Quick check if we're in a bad state
-      if (memUsage.rss > 500 * 1024 * 1024) { // > 500MB
-        healthStatus.status = 'warning';
-        healthStatus.warning = 'High memory usage';
+      // Critical thresholds for immediate response
+      if (rssInMB > 450) { // Approaching 512MB limit
+        status = 'warning';
+        warnings.push('Memory approaching limit');
       }
       
-      logger.debug('Health check completed', {
-        status: healthStatus.status,
-        responseTime: healthStatus.responseTime,
-        uptime: healthStatus.uptime
+      if (uptime < 30) {
+        warnings.push('Recent startup');
+      }
+      
+      const responseTime = Date.now() - startTime;
+      
+      // Always return 200 OK for Render - let it decide based on response time
+      res.status(200).json({
+        status,
+        uptime,
+        memory: `${rssInMB}MB`,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        pid: process.pid,
+        rt: responseTime, // Abbreviated for speed
+        ts: Date.now() // Timestamp as number for speed
       });
       
-      return res.status(200).json(healthStatus);
+      // Log only if response is slow (debug purposes)
+      if (responseTime > 25) {
+        logger.warn('Health check slow response', {
+          responseTime,
+          target: '<25ms',
+          status,
+          uptime
+        });
+      }
       
     } catch (error) {
-      logger.error('Health check failed', { error: error.message });
+      // Even errors should return 200 with error info
+      const responseTime = Date.now() - startTime;
       
-      return res.status(200).json({
+      res.status(200).json({
         status: 'error',
-        timestamp: new Date().toISOString(),
         error: error.message,
-        uptime: Math.floor(process.uptime())
+        uptime: Math.floor(process.uptime()),
+        rt: responseTime,
+        ts: Date.now()
       });
+      
+      logger.error('Health check exception', { error: error.message, responseTime });
     }
   }
   
