@@ -69,7 +69,13 @@ class KeitaroService {
    */
   async getClickById(clickId) {
     try {
-      logger.info('🔍 Getting click data', { clickId });
+      const fullUrl = `${this.client.defaults.baseURL}${API_CONFIG.KEITARO.ENDPOINTS.CLICKS}/${clickId}`;
+      logger.info('🔍 Getting click data', { 
+        clickId, 
+        baseURL: this.client.defaults.baseURL,
+        endpoint: API_CONFIG.KEITARO.ENDPOINTS.CLICKS,
+        fullUrl 
+      });
       
       const response = await this.client.get(`${API_CONFIG.KEITARO.ENDPOINTS.CLICKS}/${clickId}`);
       

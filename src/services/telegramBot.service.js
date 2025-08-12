@@ -30,17 +30,22 @@ class TelegramBotService {
         return true;
       }
       
-      // Delete any existing webhook to avoid conflicts
+      // Force delete any existing webhook and stop any other polling instances
       try {
-        const webhookInfo = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/getWebhookInfo`);
-        const webhookData = await webhookInfo.json();
+        logger.info('🔧 Cleaning up Telegram bot state...');
         
-        if (webhookData.result && webhookData.result.url) {
-          logger.info('Removing existing webhook', { url: webhookData.result.url });
-          await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/deleteWebhook`);
-        }
+        // Delete webhook unconditionally
+        const deleteWebhook = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/deleteWebhook?drop_pending_updates=true`, {
+          method: 'POST'
+        });
+        const deleteResult = await deleteWebhook.json();
+        logger.info('Webhook deletion result', { success: deleteResult.ok });
+        
+        // Small delay to allow cleanup
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
       } catch (error) {
-        logger.warn('Failed to check/remove webhook', { error: error.message });
+        logger.warn('Failed to cleanup bot state', { error: error.message });
       }
       
       const options = {
