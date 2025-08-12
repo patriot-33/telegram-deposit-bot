@@ -120,6 +120,36 @@ class TelegramDepositBot {
     this.app.get('/postback', WebhookController.processPostback);
     this.app.post('/postback', WebhookController.processPostback);
     
+    // Telegram webhook endpoint (for webhook mode)
+    this.app.post('/telegram/webhook', async (req, res) => {
+      try {
+        logger.info('📨 Telegram webhook received', {
+          update_id: req.body.update_id,
+          type: req.body.message ? 'message' : req.body.callback_query ? 'callback_query' : 'other'
+        });
+        
+        const update = req.body;
+        
+        // Handle message updates
+        if (update.message) {
+          await this.handleTelegramMessage(update.message);
+        }
+        
+        // Handle callback query updates (inline buttons)
+        if (update.callback_query) {
+          await telegramBotService.handleCallbackQuery(update.callback_query);
+        }
+        
+        res.status(200).json({ ok: true });
+      } catch (error) {
+        logger.error('Telegram webhook handler error', {
+          error: error.message,
+          update: req.body
+        });
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+    
     // Admin endpoints (for monitoring)
     this.app.get('/admin/stats', this.getStats.bind(this));
     this.app.get('/admin/test', this.testServices.bind(this));
@@ -197,6 +227,45 @@ class TelegramDepositBot {
       logger.info('📤 SIGINT received');
       this.shutdown('SIGINT');
     });
+  }
+  
+  /**
+   * Handle Telegram message (webhook mode)
+   */
+  async handleTelegramMessage(msg) {
+    try {
+      // Handle different message types
+      if (msg.text) {
+        const text = msg.text.trim();
+        
+        if (text.startsWith('/start')) {
+          await telegramBotService.handleStartCommand(msg);
+        } else if (text.startsWith('/help')) {
+          await telegramBotService.handleHelpCommand(msg);
+        } else if (text.startsWith('/status')) {
+          await telegramBotService.handleStatusCommand(msg);
+        } else if (text.startsWith('/users')) {
+          await telegramBotService.handleUsersCommand(msg);
+        } else if (text.startsWith('/requests')) {
+          await telegramBotService.handleRequestsCommand(msg);
+        } else if (text.startsWith('/ban ')) {
+          const match = text.match(/\/ban (.+)/);
+          if (match) {
+            await telegramBotService.handleBanCommand(msg, match[1]);
+          }
+        } else if (text.startsWith('/unban ')) {
+          const match = text.match(/\/unban (.+)/);
+          if (match) {
+            await telegramBotService.handleUnbanCommand(msg, match[1]);
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Telegram message handling error', {
+        error: error.message,
+        message: msg
+      });
+    }
   }
   
   /**

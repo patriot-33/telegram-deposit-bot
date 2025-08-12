@@ -82,11 +82,19 @@ class TelegramBotService {
       
       this.bot = new TelegramBot(config.telegram.botToken, options);
       
-      if (config.bot.pollingEnabled) {
+      if (config.bot.webhookMode && config.bot.webhookUrl) {
+        // Set webhook for Telegram
+        await this.bot.setWebHook(config.bot.webhookUrl);
+        this.setupWebhookHandlers();
+        logger.info('✅ Telegram bot initialized with webhook', { 
+          url: config.bot.webhookUrl 
+        });
+      } else if (config.bot.pollingEnabled) {
         this.setupPollingHandlers();
         logger.info('✅ Telegram bot initialized with polling');
       } else {
-        logger.info('✅ Telegram bot initialized without polling (webhook mode)');
+        this.setupPollingHandlers(); // Fallback to polling handlers for webhook mode
+        logger.info('✅ Telegram bot initialized (handlers only)');
       }
       
       this.isInitialized = true;
@@ -99,6 +107,13 @@ class TelegramBotService {
       });
       throw error;
     }
+  }
+  
+  /**
+   * Setup webhook handlers (no-op - handled by main Express server)
+   */
+  setupWebhookHandlers() {
+    logger.info('📱 Telegram bot webhook handlers configured (integrated with main server)');
   }
   
   /**

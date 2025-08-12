@@ -26,8 +26,9 @@ const configSchema = Joi.object({
   OWNER_IDS: Joi.string().required(),
   
   // Bot Configuration
-  POLLING_ENABLED: Joi.boolean().default(true),
-  WEBHOOK_MODE: Joi.boolean().default(false),
+  POLLING_ENABLED: Joi.boolean().default(false),
+  WEBHOOK_MODE: Joi.boolean().default(true),
+  TELEGRAM_WEBHOOK_URL: Joi.string().uri().optional(),
   
   // Keitaro Configuration  
   KEITARO_BASE_URL: Joi.string().uri().required(),
@@ -77,7 +78,8 @@ const config = {
   
   bot: {
     pollingEnabled: value.POLLING_ENABLED,
-    webhookMode: value.WEBHOOK_MODE
+    webhookMode: value.WEBHOOK_MODE,
+    webhookUrl: value.TELEGRAM_WEBHOOK_URL
   },
   
   owners: value.OWNER_IDS.split(',').map(id => parseInt(id.trim())),
