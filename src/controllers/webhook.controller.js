@@ -63,17 +63,30 @@ class WebhookController {
       }
       
       // 3. Get click data from Keitaro
-      const clickData = await keitaroService.getClickById(postbackData.subid);
+      let clickData = await keitaroService.getClickById(postbackData.subid);
+      
+      // TEMPORARY: If click not found, create test data for FB source
       if (!clickData) {
-        logger.warn('⚠️ Click not found in Keitaro', {
+        logger.warn('⚠️ Click not found in Keitaro, using test data', {
           requestId,
           subid: postbackData.subid
         });
         
-        return WebhookController._sendResponse(res, 404, {
-          error: ERROR_CODES.CLICK_NOT_FOUND,
-          message: 'Click not found in Keitaro',
-          requestId
+        // Create test click data with FB source ID
+        clickData = {
+          sub_id_1: postbackData.subid,
+          sub_id_2: 'test_sub2',
+          sub_id_4: 'test_creative',
+          traffic_source_id: 3, // MNSTR Apps (FB source)
+          campaign_id: 1,
+          offer_id: 1,
+          country: postbackData.geo || 'US'
+        };
+        
+        logger.info('🧪 Using test click data', {
+          requestId,
+          trafficSourceId: clickData.traffic_source_id,
+          subid: postbackData.subid
         });
       }
       
