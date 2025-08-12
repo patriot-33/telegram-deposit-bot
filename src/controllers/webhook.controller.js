@@ -7,7 +7,7 @@ const Joi = require('joi');
 const logger = require('../utils/logger');
 const { ERROR_CODES, POSTBACK_STATUS } = require('../config/constants');
 const keitaroService = require('../services/keitaro.service');
-const telegramService = require('../services/telegram.service');
+const telegramBotService = require('../services/telegramBot.service');
 const trafficSourceService = require('../services/trafficSource.service');
 
 // Postback validation schema
@@ -97,7 +97,7 @@ class WebhookController {
       const enrichedData = await WebhookController._enrichDepositData(postbackData, clickData);
       
       // 6. Send Telegram notification
-      const notificationResult = await telegramService.sendDepositNotification(enrichedData);
+      const notificationResult = await telegramBotService.sendDepositNotification(enrichedData);
       
       if (notificationResult.success) {
         logger.info('✅ Deposit notification sent successfully', {
@@ -110,7 +110,7 @@ class WebhookController {
         return WebhookController._sendResponse(res, 200, {
           message: 'Deposit notification sent successfully',
           requestId,
-          telegramMessageId: notificationResult.messageId
+          broadcastStats: notificationResult.stats
         });
       } else {
         logger.error('❌ Failed to send Telegram notification', {
@@ -134,14 +134,22 @@ class WebhookController {
         query: req.query
       });
       
-      // Send error notification to Telegram
+      // Send error notification to owners
       try {
-        await telegramService.sendErrorNotification({
-          error: error.message,
-          subid: req.query.subid || 'unknown',
-          timestamp: new Date().toISOString(),
-          requestId
-        });
+        const config = require('../config/config');
+        const errorMessage = `❌ <b>Ошибка обработки постбека</b>\n\n` +
+                           `Ошибка: ${error.message}\n` +
+                           `SubID: ${req.query.subid || 'unknown'}\n` +
+                           `ID запроса: ${requestId}\n\n` +
+                           `<i>Время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}</i>`;
+        
+        for (const ownerId of config.owners) {
+          try {
+            await telegramBotService.sendMessage(ownerId, errorMessage, { parse_mode: 'HTML' });
+          } catch (msgError) {
+            logger.warn(`Failed to send error notification to owner ${ownerId}`, { msgError });
+          }
+        }
       } catch (telegramError) {
         logger.error('Failed to send error notification', { telegramError });
       }
@@ -249,9 +257,13 @@ class WebhookController {
       const keitaroStatus = await keitaroService.checkHealth();
       
       // Check Telegram Bot API connectivity  
-      const telegramStatus = await telegramService.checkHealth();
+      const telegramStatus = await telegramBotService.checkHealth();
       
-      const isHealthy = keitaroStatus.healthy && telegramStatus.healthy;
+      // Add database health check
+      const { checkDatabaseHealth } = require('../models');
+      const dbStatus = await checkDatabaseHealth();
+      
+      const isHealthy = keitaroStatus.healthy && telegramStatus.healthy && dbStatus.healthy;
       
       return res.status(isHealthy ? 200 : 503).json({
         status: isHealthy ? 'healthy' : 'unhealthy',
@@ -259,7 +271,8 @@ class WebhookController {
         uptime: process.uptime(),
         services: {
           keitaro: keitaroStatus,
-          telegram: telegramStatus
+          telegram: telegramStatus,
+          database: dbStatus
         }
       });
     } catch (error) {

@@ -33,7 +33,9 @@
     "winston": "^3.11.0",
     "joi": "^17.11.0",
     "moment": "^2.29.4",
-    "redis": "^4.6.8"
+    "redis": "^4.6.8",
+    "pg": "^8.11.3",
+    "sequelize": "^6.35.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",

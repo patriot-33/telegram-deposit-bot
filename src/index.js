@@ -17,7 +17,10 @@ const trafficSourceService = require('./services/trafficSource.service');
 
 // Import services for health checks
 const keitaroService = require('./services/keitaro.service');
-const telegramService = require('./services/telegram.service');
+const telegramBotService = require('./services/telegramBot.service');
+
+// Import database models
+const { initializeDatabase, checkDatabaseHealth } = require('./models');
 
 class TelegramDepositBot {
   constructor() {
@@ -240,12 +243,14 @@ class TelegramDepositBot {
       
       const results = {
         keitaro: await keitaroService.checkHealth(),
-        telegram: await telegramService.checkHealth(),
+        telegram: await telegramBotService.checkHealth(),
+        database: await checkDatabaseHealth(),
         trafficSources: trafficSourceService.validateConfiguration()
       };
       
       const allHealthy = results.keitaro.healthy && 
                         results.telegram.healthy && 
+                        results.database.healthy &&
                         results.trafficSources.valid;
       
       res.status(allHealthy ? 200 : 503).json({
@@ -268,15 +273,16 @@ class TelegramDepositBot {
    */
   async testNotification(req, res) {
     try {
-      logger.info('🧪 Sending test notification');
+      logger.info('🧪 Sending test notification to owners');
       
-      const result = await telegramService.sendTestMessage();
+      const result = await telegramBotService.sendTestMessage();
       
       if (result.success) {
         res.json({
           success: true,
-          message: 'Test notification sent',
-          messageId: result.messageId,
+          message: 'Test notification sent to owners',
+          sent: result.sent,
+          total: result.total,
           timestamp: new Date().toISOString()
         });
       } else {
@@ -323,6 +329,14 @@ class TelegramDepositBot {
       // Validate configuration
       config.validateConfig();
       
+      // Initialize database
+      logger.info('🔄 Initializing database...');
+      await initializeDatabase();
+      
+      // Initialize Telegram bot
+      logger.info('🤖 Initializing Telegram bot...');
+      await telegramBotService.initialize();
+      
       // Validate traffic sources configuration
       const trafficSourceValidation = trafficSourceService.validateConfiguration();
       if (!trafficSourceValidation.valid) {
@@ -349,29 +363,40 @@ class TelegramDepositBot {
         logger.info('   GET  /admin/test           - Service health test');
         logger.info('   POST /admin/test-notification - Test Telegram notification');
         logger.info('   GET  /admin/traffic-sources - Traffic sources info');
+        logger.info('');
+        logger.info('🤖 Telegram Bot Features:');
+        logger.info('   📱 User management with approval system');
+        logger.info('   🔔 Broadcast notifications to approved users');
+        logger.info('   👑 Owner commands for user management');
+        logger.info(`   📊 ${config.owners.length} owner(s) configured`);
       });
       
       // Test services on startup
       setTimeout(async () => {
         try {
           const keitaroHealth = await keitaroService.checkHealth();
-          const telegramHealth = await telegramService.checkHealth();
+          const telegramHealth = await telegramBotService.checkHealth();
+          const dbHealth = await checkDatabaseHealth();
           
-          if (keitaroHealth.healthy && telegramHealth.healthy) {
+          if (keitaroHealth.healthy && telegramHealth.healthy && dbHealth.healthy) {
             logger.info('✅ All services are healthy and ready');
             
-            // Send startup notification
-            await telegramService.sendTestMessage();
-            logger.info('📱 Startup notification sent to Telegram');
+            // Send startup notification to owners
+            const startupResult = await telegramBotService.sendTestMessage();
+            logger.info('📱 Startup notification sent to owners', {
+              sent: startupResult.sent,
+              total: startupResult.total
+            });
           } else {
             logger.warn('⚠️ Some services are not healthy:');
             logger.warn(`   Keitaro: ${keitaroHealth.healthy ? '✅' : '❌'}`);
             logger.warn(`   Telegram: ${telegramHealth.healthy ? '✅' : '❌'}`);
+            logger.warn(`   Database: ${dbHealth.healthy ? '✅' : '❌'}`);
           }
         } catch (error) {
           logger.error('Startup health check failed', { error: error.message });
         }
-      }, 2000);
+      }, 3000);
       
     } catch (error) {
       logger.error('💥 Failed to start server', {
@@ -392,12 +417,19 @@ class TelegramDepositBot {
       this.server.close(() => {
         logger.info('✅ HTTP server closed');
         
-        // Send shutdown notification
-        telegramService.sendSystemStatus({
-          uptime: Math.floor((Date.now() - this.startTime) / 1000),
-          processed_deposits: this.processedDeposits,
-          last_activity: this.lastActivity || 'No activity'
-        }).finally(() => {
+        // Send shutdown notification to owners
+        const shutdownMessage = `🛑 <b>Бот завершает работу</b>\n\n` +
+                               `⏱️ Время работы: ${Math.floor((Date.now() - this.startTime) / 1000)} сек\n` +
+                               `📊 Обработано депозитов: ${this.processedDeposits}\n` +
+                               `🕒 Последняя активность: ${this.lastActivity || 'Нет данных'}\n\n` +
+                               `<i>Время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}</i>`;
+        
+        const promises = config.owners.map(ownerId => 
+          telegramBotService.sendMessage(ownerId, shutdownMessage, { parse_mode: 'HTML' })
+            .catch(err => logger.warn(`Failed to send shutdown notification to ${ownerId}`))
+        );
+        
+        Promise.allSettled(promises).finally(() => {
           logger.info('👋 Graceful shutdown completed');
           process.exit(0);
         });

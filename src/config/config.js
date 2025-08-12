@@ -18,7 +18,16 @@ const configSchema = Joi.object({
   
   // Telegram Configuration
   TELEGRAM_BOT_TOKEN: Joi.string().required(),
-  TELEGRAM_CHAT_ID: Joi.string().required(),
+  
+  // Database Configuration
+  DATABASE_URL: Joi.string().uri().required(),
+  
+  // Bot Owners
+  OWNER_IDS: Joi.string().required(),
+  
+  // Bot Configuration
+  POLLING_ENABLED: Joi.boolean().default(true),
+  WEBHOOK_MODE: Joi.boolean().default(false),
   
   // Keitaro Configuration  
   KEITARO_BASE_URL: Joi.string().uri().required(),
@@ -59,9 +68,19 @@ const config = {
   port: value.PORT,
   
   telegram: {
-    botToken: value.TELEGRAM_BOT_TOKEN,
-    chatId: value.TELEGRAM_CHAT_ID
+    botToken: value.TELEGRAM_BOT_TOKEN
   },
+  
+  database: {
+    url: value.DATABASE_URL
+  },
+  
+  bot: {
+    pollingEnabled: value.POLLING_ENABLED,
+    webhookMode: value.WEBHOOK_MODE
+  },
+  
+  owners: value.OWNER_IDS.split(',').map(id => parseInt(id.trim())),
   
   keitaro: {
     baseUrl: value.KEITARO_BASE_URL,
@@ -91,7 +110,7 @@ const config = {
 function validateConfig() {
   const required = [
     'telegram.botToken',
-    'telegram.chatId',
+    'database.url',
     'keitaro.baseUrl',
     'keitaro.apiKey'
   ];
@@ -112,7 +131,15 @@ function validateConfig() {
     process.exit(1);
   }
   
+  // Validate owners array
+  if (!Array.isArray(config.owners) || config.owners.length === 0) {
+    console.error('❌ At least one owner ID must be configured');
+    process.exit(1);
+  }
+  
   console.log('✅ Configuration validated successfully');
+  console.log(`📋 Bot owners: ${config.owners.join(', ')}`);
+  console.log(`🤖 Polling enabled: ${config.bot.pollingEnabled}`);
   
   if (config.env === 'development') {
     console.log('🔧 Running in development mode');
