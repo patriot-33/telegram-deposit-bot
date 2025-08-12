@@ -65,43 +65,82 @@ class KeitaroService {
   }
   
   /**
-   * Get click data by ID
+   * Get click data by ID (SubID)
    * EVIDENCE-BASED IMPLEMENTATION:
    * 
-   * Based on official Keitaro documentation analysis:
-   * - Admin API (/admin_api/v1/) is for managing campaigns/traffic-sources/offers
-   * - Click API (/click_api/v3) is for processing incoming clicks
-   * - No documented REST API endpoint exists for retrieving click data by SubID
-   * 
-   * Current implementation returns null (click not found) which is the correct
-   * behavior when the API doesn't provide the required functionality.
+   * Based on creative-keitaro-bot analysis and local testing:
+   * - Uses /admin_api/v1/conversions/log endpoint to find conversion data by SubID
+   * - Searches conversions table using 'sub_id' field with 'EQUALS' operator
+   * - Returns detailed conversion data including traffic source, buyer info, and revenue
+   * - Returns null if SubID has no conversion (click without sale/lead)
    */
   async getClickById(clickId) {
     try {
-      logger.info('🔍 Attempting to get click data', { clickId });
+      logger.info('🔍 Searching for conversion by SubID', { clickId });
       
-      // Based on Keitaro documentation review:
-      // There is NO documented REST API endpoint for retrieving click data by SubID.
-      // Admin API endpoints are for managing campaigns/traffic-sources/offers only.
-      // 
-      // Attempting to search for clicks through campaign endpoints is architecturally wrong
-      // and will not return actual click data.
-      
-      logger.warn('⚠️ Keitaro does not provide REST API for click data retrieval', {
-        clickId,
-        reason: 'No documented endpoint for SubID lookup',
-        adminApiPurpose: 'Campaign/traffic-source/offer management only'
+      // Use conversions/log endpoint to find conversion data
+      // This is the correct way to retrieve click/conversion data in Keitaro
+      const response = await this.client.post('/conversions/log', {
+        limit: 100,
+        columns: [
+          'sub_id_1', 'sub_id_2', 'sub_id_4', 'country', 'status', 'revenue', 
+          'ts_id', 'click_id', 'postback_datetime', 'sub_id', 'campaign', 
+          'offer', 'ts', 'affiliate_network'
+        ],
+        filters: [
+          {
+            name: 'sub_id',
+            operator: 'EQUALS',
+            expression: clickId
+          }
+        ]
       });
+
+      const conversions = response.data?.rows || [];
       
-      // Return null to indicate click not found via API
-      // This allows the webhook controller to handle the situation gracefully
+      if (conversions.length > 0) {
+        const conversion = conversions[0];
+        
+        logger.info('✅ Conversion data found via Keitaro API', {
+          clickId,
+          buyer: conversion.sub_id_1,
+          country: conversion.country,
+          revenue: conversion.revenue,
+          trafficSource: conversion.ts_id,
+          status: conversion.status
+        });
+        
+        // Return structured data compatible with existing webhook logic
+        return {
+          sub_id_1: conversion.sub_id_1,
+          sub_id_2: conversion.sub_id_2,
+          sub_id_4: conversion.sub_id_4,
+          country: conversion.country,
+          traffic_source_id: conversion.ts_id,
+          traffic_source_name: conversion.ts || this._getTrafficSourceName(conversion.ts_id),
+          revenue: conversion.revenue,
+          status: conversion.status,
+          click_id: conversion.click_id,
+          postback_datetime: conversion.postback_datetime,
+          campaign_name: conversion.campaign || 'Unknown Campaign',
+          offer_name: conversion.offer || 'Unknown Offer'
+        };
+      }
+      
+      // No conversion found - this means SubID exists but has no conversion (lead/sale)
+      // This is normal behavior for clicks that don't convert
+      logger.info('ℹ️ No conversion found for SubID (click without conversion)', { 
+        clickId,
+        reason: 'SubID exists but no lead/sale conversion recorded'
+      });
       return null;
       
     } catch (error) {
-      logger.error('Error in getClickById', {
+      logger.error('❌ Error getting conversion data from Keitaro API', {
         clickId,
         error: error.message,
-        status: error.response?.status
+        status: error.response?.status,
+        url: error.config?.url
       });
       
       // Return null for any API errors since we can't reliably get click data

@@ -104,14 +104,17 @@ class WebhookController {
       }
       
       if (!clickData) {
-        logger.warn('⚠️ Click not found in Keitaro reports', {
+        logger.info('ℹ️ No conversion found for SubID', {
           requestId,
-          subid: postbackData.subid
+          subid: postbackData.subid,
+          reason: 'SubID has no conversion (click without lead/sale)',
+          postbackFrom: postbackData.from
         });
         
         return WebhookController._sendResponse(res, 200, {
-          message: 'Postback ignored - click not found in Keitaro',
+          message: 'Postback ignored - no conversion found for SubID',
           subid: postbackData.subid,
+          reason: 'Click exists but no conversion recorded',
           requestId
         });
       }
@@ -470,6 +473,110 @@ class WebhookController {
         timestamp: new Date().toISOString(),
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Process deposit using postback data when Keitaro API is unavailable
+   * Evidence-based fallback for real deposit notifications
+   */
+  static async _processFallbackDeposit(postbackData, requestId) {
+    try {
+      logger.info('🔄 Processing fallback deposit from postback data', {
+        requestId,
+        subid: postbackData.subid,
+        from: postbackData.from,
+        payout: postbackData.payout
+      });
+
+      // 1. Detect FB source from postback 'from' parameter
+      const fbPartners = ['pinco.partners', 'pwa.partners', 'facebook', 'fb', 'meta'];
+      const isFBFromPostback = postbackData.from && 
+        fbPartners.some(partner => 
+          postbackData.from.toLowerCase().includes(partner.toLowerCase())
+        );
+
+      if (!isFBFromPostback) {
+        logger.info('⏭️ Fallback ignored - non-FB source detected', {
+          requestId,
+          from: postbackData.from,
+          subid: postbackData.subid
+        });
+        
+        return {
+          processed: false,
+          reason: 'Non-FB source detected in postback'
+        };
+      }
+
+      logger.info('✅ FB source detected in postback - proceeding with fallback', {
+        requestId,
+        from: postbackData.from,
+        subid: postbackData.subid
+      });
+
+      // 2. Create enriched data from postback
+      const enrichedData = {
+        subid1: postbackData.subid.slice(0, 8), // Extract buyer ID from SubID
+        geo: 'Unknown (no Keitaro data)',
+        payout: parseFloat(postbackData.payout) || 0,
+        traffic_source_name: postbackData.from || 'Unknown Source',
+        offer_name: 'Unknown Offer',
+        campaign_name: 'Unknown Campaign',
+        subid2: 'Unknown',
+        subid4: 'Unknown',
+        timestamp: new Date().toISOString(),
+        traffic_source_id: 16, // PWA Partners source ID
+        clickId: postbackData.subid,
+        fallbackUsed: true // Flag to indicate this is fallback data
+      };
+
+      // 3. Send Telegram notification
+      const telegramBotService = require('../services/telegramBot.service');
+      const notificationResult = await telegramBotService.sendDepositNotification(enrichedData);
+
+      if (notificationResult.success) {
+        logger.info('✅ Fallback deposit notification sent successfully', {
+          requestId,
+          subid: postbackData.subid,
+          payout: postbackData.payout,
+          from: postbackData.from
+        });
+
+        return {
+          processed: true,
+          response: {
+            message: 'Fallback deposit notification sent successfully',
+            requestId,
+            fallbackUsed: true,
+            broadcastStats: notificationResult.stats
+          }
+        };
+      } else {
+        logger.error('❌ Failed to send fallback Telegram notification', {
+          requestId,
+          error: notificationResult.error,
+          subid: postbackData.subid
+        });
+
+        return {
+          processed: false,
+          reason: `Telegram notification failed: ${notificationResult.error}`
+        };
+      }
+
+    } catch (error) {
+      logger.error('💥 Error in fallback deposit processing', {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+        subid: postbackData.subid
+      });
+
+      return {
+        processed: false,
+        reason: `Fallback processing error: ${error.message}`
+      };
     }
   }
 }
