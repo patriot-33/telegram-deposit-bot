@@ -101,7 +101,7 @@ class TelegramDepositBot {
    * Setup application routes
    */
   setupRoutes() {
-    // Root endpoint
+    // Root endpoint  
     this.app.get('/', (req, res) => {
       res.json({
         name: 'Telegram Deposit Bot',
@@ -113,8 +113,14 @@ class TelegramDepositBot {
       });
     });
     
-    // Health check endpoint
+    // Simple keep-alive endpoint for Render.com
+    this.app.get('/ping', (req, res) => {
+      res.status(200).send('pong');
+    });
+    
+    // Health check endpoints
     this.app.get('/health', WebhookController.healthCheck);
+    this.app.get('/admin/health-detailed', WebhookController.detailedHealthCheck);
     
     // Postback webhook endpoint
     this.app.get('/postback', WebhookController.processPostback);
@@ -616,8 +622,8 @@ class TelegramDepositBot {
             global.gc();
           }
           
-          // Self-ping to prevent hibernation
-          fetch(`http://localhost:${config.port}/health`)
+          // Self-ping to prevent hibernation (use fast /ping endpoint)
+          fetch(`http://localhost:${config.port}/ping`)
             .catch(() => {}); // Ignore errors, just keep alive
             
         } catch (error) {

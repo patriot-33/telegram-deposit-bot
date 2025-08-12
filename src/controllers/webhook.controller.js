@@ -364,9 +364,60 @@ class WebhookController {
   }
   
   /**
-   * Health check endpoint
+   * Health check endpoint - optimized for Render.com
    */
   static async healthCheck(req, res) {
+    try {
+      // Quick health check - don't check external services (too slow for Render)
+      const startTime = Date.now();
+      
+      // Just check that the process is alive and basic services work
+      const memUsage = process.memoryUsage();
+      const uptime = process.uptime();
+      
+      // Simple response for Render health checks
+      const healthStatus = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(uptime),
+        memory: {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`
+        },
+        pid: process.pid,
+        responseTime: Date.now() - startTime
+      };
+      
+      // Quick check if we're in a bad state
+      if (memUsage.rss > 500 * 1024 * 1024) { // > 500MB
+        healthStatus.status = 'warning';
+        healthStatus.warning = 'High memory usage';
+      }
+      
+      logger.debug('Health check completed', {
+        status: healthStatus.status,
+        responseTime: healthStatus.responseTime,
+        uptime: healthStatus.uptime
+      });
+      
+      return res.status(200).json(healthStatus);
+      
+    } catch (error) {
+      logger.error('Health check failed', { error: error.message });
+      
+      return res.status(200).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        error: error.message,
+        uptime: Math.floor(process.uptime())
+      });
+    }
+  }
+  
+  /**
+   * Detailed health check endpoint for monitoring
+   */
+  static async detailedHealthCheck(req, res) {
     try {
       // Check Keitaro API connectivity
       const keitaroStatus = await keitaroService.checkHealth();
@@ -391,7 +442,7 @@ class WebhookController {
         }
       });
     } catch (error) {
-      logger.error('Health check failed', { error: error.message });
+      logger.error('Detailed health check failed', { error: error.message });
       
       return res.status(503).json({
         status: 'unhealthy',
