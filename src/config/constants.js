@@ -83,9 +83,11 @@ const API_CONFIG = {
   KEITARO: {
     ENDPOINTS: {
       CLICKS: '/clicks',
-      CAMPAIGNS: '/campaigns',
+      CAMPAIGNS: '/campaigns', 
       OFFERS: '/offers',
-      TRAFFIC_SOURCES: '/traffic_sources'
+      TRAFFIC_SOURCES: '/traffic_sources',
+      CONVERSIONS: '/conversions',
+      REPORTS: '/reports'
     },
     TIMEOUT: 10000,
     RETRY_ATTEMPTS: 3,

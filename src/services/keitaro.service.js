@@ -72,51 +72,116 @@ class KeitaroService {
       logger.info('🔍 Getting click data via reports endpoint', { clickId });
       
       // Use reports endpoint to search for click by subid
-      const response = await this.client.get('/reports/build', {
-        params: {
-          range: 'today',  // Search today's data
-          timezone: 'UTC',
-          grouping: ['subid'],
-          filters: [
-            {
-              name: 'subid',
-              operator: 'EQUALS',
-              expression: clickId
-            }
-          ],
-          columns: [
-            'subid', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4',
-            'campaign_id', 'campaign_name', 'offer_id', 'offer_name', 
-            'traffic_source_id', 'traffic_source_name', 
-            'country', 'clicks', 'leads', 'sales', 'revenue'
-          ],
-          limit: 1
-        }
-      });
+      // Try different possible report endpoints
+      let response;
+      const reportParams = {
+        range: 'today',  // Search today's data
+        timezone: 'UTC',
+        grouping: ['subid'],
+        filters: [
+          {
+            name: 'subid',
+            operator: 'EQUALS',
+            expression: clickId
+          }
+        ],
+        columns: [
+          'subid', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4',
+          'campaign_id', 'campaign_name', 'offer_id', 'offer_name', 
+          'traffic_source_id', 'traffic_source_name', 
+          'country', 'clicks', 'leads', 'sales', 'revenue'
+        ],
+        limit: 1
+      };
       
-      const rows = response.data?.rows;
-      if (!rows || rows.length === 0) {
-        logger.warn('Click not found in Keitaro reports', { clickId });
+      // Try different endpoints
+      const reportEndpoints = ['/reports/build', '/reports', '/conversions'];
+      
+      for (const endpoint of reportEndpoints) {
+        try {
+          logger.info(`Trying endpoint: ${endpoint}`, { clickId });
+          
+          if (endpoint === '/conversions') {
+            // For conversions endpoint, try simpler params
+            response = await this.client.get(endpoint, { 
+              params: { 
+                subid: clickId,
+                limit: 1
+              }
+            });
+          } else {
+            // For reports endpoints, use complex params
+            response = await this.client.get(endpoint, { params: reportParams });
+          }
+          
+          logger.info(`✅ Success with endpoint: ${endpoint}`, {
+            dataType: typeof response.data,
+            hasRows: !!response.data?.rows,
+            dataLength: Array.isArray(response.data) ? response.data.length : 'N/A'
+          });
+          break;
+        } catch (endpointError) {
+          logger.warn(`Failed with endpoint ${endpoint}:`, { 
+            status: endpointError.response?.status,
+            message: endpointError.message 
+          });
+          if (endpoint === reportEndpoints[reportEndpoints.length - 1]) {
+            // If this is the last endpoint, throw the error
+            throw endpointError;
+          }
+        }
+      }
+      
+      // Handle different response formats
+      let result = null;
+      
+      if (response.data?.rows) {
+        // Reports format with rows and columns
+        const rows = response.data.rows;
+        if (!rows || rows.length === 0) {
+          logger.warn('Click not found in Keitaro reports', { clickId });
+          return null;
+        }
+        
+        // Parse the first (and should be only) row
+        const clickData = rows[0];
+        const columns = response.data.columns;
+        
+        // Map column indices to values
+        result = {};
+        columns.forEach((column, index) => {
+          result[column] = clickData[index];
+        });
+        
+      } else if (Array.isArray(response.data)) {
+        // Direct array format (conversions endpoint)
+        if (response.data.length === 0) {
+          logger.warn('Click not found in Keitaro conversions', { clickId });
+          return null;
+        }
+        
+        result = response.data[0];
+        
+      } else if (response.data && typeof response.data === 'object') {
+        // Direct object format
+        result = response.data;
+      } else {
+        logger.warn('Unexpected response format from Keitaro', { 
+          clickId,
+          dataType: typeof response.data,
+          keys: Object.keys(response.data || {})
+        });
         return null;
       }
       
-      // Parse the first (and should be only) row
-      const clickData = rows[0];
-      const columns = response.data.columns;
-      
-      // Map column indices to values
-      const result = {};
-      columns.forEach((column, index) => {
-        result[column] = clickData[index];
-      });
-      
-      logger.info('✅ Click data retrieved via reports', {
+      logger.info('✅ Click data retrieved from Keitaro', {
         clickId,
         campaignId: result.campaign_id,
         trafficSourceId: result.traffic_source_id,
         offerId: result.offer_id,
         country: result.country,
-        revenue: result.revenue
+        revenue: result.revenue,
+        fields: Object.keys(result)
       });
       
       return result;
