@@ -198,11 +198,14 @@ class TelegramDepositBot {
       });
     });
     
-    // Process error handlers
+    // Process error handlers with detailed logging
     process.on('uncaughtException', (error) => {
-      logger.error('🚨 Uncaught Exception', {
+      logger.error('🚨 Uncaught Exception - FATAL', {
         error: error.message,
-        stack: error.stack
+        stack: error.stack,
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        pid: process.pid
       });
       
       // Graceful shutdown
@@ -210,24 +213,60 @@ class TelegramDepositBot {
     });
     
     process.on('unhandledRejection', (reason, promise) => {
-      logger.error('🚨 Unhandled Rejection', {
-        reason,
-        promise
+      logger.error('🚨 Unhandled Rejection - FATAL', {
+        reason: reason?.message || reason,
+        stack: reason?.stack,
+        promise: promise.toString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        pid: process.pid
       });
       
       // Graceful shutdown
       this.shutdown('unhandledRejection');
     });
     
-    // Graceful shutdown signals
+    // System signal handlers with detailed logging
     process.on('SIGTERM', () => {
-      logger.info('📤 SIGTERM received');
+      logger.error('📤 SIGTERM received - Render is terminating process', {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        pid: process.pid,
+        reason: 'SIGTERM - likely resource limit or platform restart'
+      });
       this.shutdown('SIGTERM');
     });
     
     process.on('SIGINT', () => {
-      logger.info('📤 SIGINT received');
+      logger.error('📤 SIGINT received - Manual termination', {
+        uptime: process.uptime(), 
+        memory: process.memoryUsage(),
+        pid: process.pid,
+        reason: 'SIGINT - manual stop or Ctrl+C'
+      });
       this.shutdown('SIGINT');
+    });
+    
+    // Additional Render.com specific signals
+    process.on('SIGHUP', () => {
+      logger.error('📤 SIGHUP received - Process restart signal', {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        pid: process.pid,
+        reason: 'SIGHUP - process restart requested'
+      });
+      this.shutdown('SIGHUP');
+    });
+    
+    // Memory/resource warnings
+    process.on('warning', (warning) => {
+      logger.warn('⚠️ Node.js Warning', {
+        name: warning.name,
+        message: warning.message,
+        stack: warning.stack,
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
+      });
     });
   }
   
@@ -540,12 +579,34 @@ class TelegramDepositBot {
         logger.info(`   📊 ${config.owners.length} owner(s) configured`);
       });
       
-      // Setup keep-alive ping for Render.com free tier
+      // Setup resource monitoring and keep-alive for Render.com
       setInterval(() => {
-        // Self-ping to prevent hibernation on Render free tier
-        fetch(`http://localhost:${config.port}/health`)
-          .catch(() => {}); // Ignore errors, just keep alive
-      }, 12 * 60 * 1000); // Every 12 minutes
+        try {
+          // Get memory and CPU usage
+          const memUsage = process.memoryUsage();
+          const uptime = process.uptime();
+          
+          logger.info('📊 System resources', {
+            uptime: Math.floor(uptime),
+            memory: {
+              rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+              heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+              heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+              external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+            },
+            pid: process.pid,
+            version: process.version,
+            platform: process.platform
+          });
+          
+          // Self-ping to prevent hibernation on Render free tier
+          fetch(`http://localhost:${config.port}/health`)
+            .catch(() => {}); // Ignore errors, just keep alive
+            
+        } catch (error) {
+          logger.error('Resource monitoring error', { error: error.message });
+        }
+      }, 5 * 60 * 1000); // Every 5 minutes
       
       // Test services on startup
       setTimeout(async () => {
@@ -584,39 +645,62 @@ class TelegramDepositBot {
   }
   
   /**
-   * Graceful shutdown
+   * Graceful shutdown with detailed diagnostics
    */
   async shutdown(signal) {
-    logger.info(`📤 Starting graceful shutdown (${signal})`);
+    const shutdownStart = Date.now();
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const memUsage = process.memoryUsage();
+    
+    logger.error(`🚨 SHUTDOWN INITIATED - Signal: ${signal}`, {
+      signal,
+      uptime,
+      startTime: new Date(this.startTime).toISOString(),
+      processedDeposits: this.processedDeposits,
+      lastActivity: this.lastActivity,
+      memory: {
+        rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+        heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`
+      },
+      pid: process.pid,
+      nodeVersion: process.version,
+      platform: process.platform
+    });
     
     if (this.server) {
       this.server.close(() => {
-        logger.info('✅ HTTP server closed');
+        logger.error('🛑 HTTP server closed - sending notifications');
         
-        // Send shutdown notification to owners
+        // Enhanced shutdown notification with diagnostics
         const shutdownMessage = `🛑 <b>Бот завершает работу</b>\n\n` +
-                               `⏱️ Время работы: ${Math.floor((Date.now() - this.startTime) / 1000)} сек\n` +
+                               `🚨 <b>Причина:</b> ${signal}\n` +
+                               `⏱️ Время работы: ${uptime} сек\n` +
                                `📊 Обработано депозитов: ${this.processedDeposits}\n` +
-                               `🕒 Последняя активность: ${this.lastActivity || 'Нет данных'}\n\n` +
+                               `🕒 Последняя активность: ${this.lastActivity || 'Нет данных'}\n` +
+                               `💾 Память: ${Math.round(memUsage.rss / 1024 / 1024)}MB\n` +
+                               `🔧 PID: ${process.pid}\n\n` +
                                `<i>Время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}</i>`;
         
         const promises = config.owners.map(ownerId => 
           telegramBotService.sendMessage(ownerId, shutdownMessage, { parse_mode: 'HTML' })
-            .catch(err => logger.warn(`Failed to send shutdown notification to ${ownerId}`))
+            .catch(err => logger.warn(`Failed to send shutdown notification to ${ownerId}`, { error: err.message }))
         );
         
         Promise.allSettled(promises).finally(() => {
-          logger.info('👋 Graceful shutdown completed');
+          const shutdownTime = Date.now() - shutdownStart;
+          logger.error(`💀 SHUTDOWN COMPLETED - Duration: ${shutdownTime}ms`);
           process.exit(0);
         });
       });
       
-      // Force shutdown after 10 seconds
+      // Force shutdown after 8 seconds (shorter timeout)
       setTimeout(() => {
-        logger.warn('⚠️ Force shutdown - timeout reached');
+        logger.error('💥 FORCE SHUTDOWN - Timeout reached after 8s');
         process.exit(1);
-      }, 10000);
+      }, 8000);
     } else {
+      logger.error('💀 IMMEDIATE EXIT - No server to close');
       process.exit(0);
     }
   }
