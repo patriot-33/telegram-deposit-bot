@@ -27,6 +27,13 @@ class WebhookController {
     const startTime = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
+    // FORCE CONSOLE LOG for Render visibility
+    console.log('\n🔄🔄🔄 POSTBACK PROCESSING 🔄🔄🔄');
+    console.log(`RequestID: ${requestId}`);
+    console.log(`Query: ${JSON.stringify(req.query)}`);
+    console.log(`IP: ${req.ip}`);
+    console.log(`Time: ${new Date().toISOString()}`);
+    
     logger.info('🔄 Processing postback', {
       requestId,
       query: req.query,
