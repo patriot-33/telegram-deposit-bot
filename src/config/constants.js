@@ -29,10 +29,27 @@ const TRAFFIC_SOURCES = {
   }
 };
 
-// Postback Status Configuration
+// Postback Status Configuration - Universal Deposit Detection
 const POSTBACK_STATUS = {
-  VALID_STATUSES: ['sale', 'dep', 'deposit', 'first_dep_confirmed', 'dep_confirmed'],
-  IGNORE_STATUSES: ['lead', 'click', 'impression', 'reg', 'registration', 'reg_confirmed', 'reg_rejected', 'dep_rejected', 'first_dep_rejected']
+  // Deposit indicators - if status contains any of these, it's considered a deposit
+  DEPOSIT_KEYWORDS: [
+    'dep', 'deposit', 'sale', 'approved', 'confirmed', 'success', 'complete',
+    'paid', 'ftd', 'first_deposit', 'payment', 'purchase', 'conversion'
+  ],
+  
+  // Rejection indicators - if status contains any of these, ignore even if has deposit keywords  
+  REJECTION_KEYWORDS: [
+    'reject', 'denied', 'cancel', 'fail', 'decline', 'void', 'refund', 'chargeback'
+  ],
+  
+  // Registration/Lead indicators - ignore these completely
+  LEAD_KEYWORDS: [
+    'lead', 'reg', 'registration', 'click', 'impression', 'install', 'signup', 'view'
+  ],
+  
+  // Legacy exact match for backward compatibility
+  EXACT_VALID_STATUSES: ['sale', 'dep', 'deposit', 'first_dep_confirmed', 'dep_confirmed'],
+  EXACT_IGNORE_STATUSES: ['lead', 'click', 'impression', 'reg', 'registration']
 };
 
 // Telegram Message Templates

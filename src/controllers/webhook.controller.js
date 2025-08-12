@@ -47,17 +47,20 @@ class WebhookController {
       
       const postbackData = validationResult.data;
       
-      // 2. Check if status should be processed
-      if (!POSTBACK_STATUS.VALID_STATUSES.includes(postbackData.status)) {
+      // 2. Check if status should be processed using universal deposit detection
+      const statusValidation = WebhookController._validateDepositStatus(postbackData.status);
+      if (!statusValidation.isValid) {
         logger.info('⏭️ Ignoring postback - invalid status', {
           requestId,
           status: postbackData.status,
+          reason: statusValidation.reason,
           subid: postbackData.subid
         });
         
         return WebhookController._sendResponse(res, 200, {
           message: 'Postback ignored - invalid status',
           status: postbackData.status,
+          reason: statusValidation.reason,
           requestId
         });
       }
@@ -249,6 +252,62 @@ class WebhookController {
         traffic_source_id: clickData.traffic_source_id
       };
     }
+  }
+  
+  /**
+   * Universal deposit status validation
+   */
+  static _validateDepositStatus(status) {
+    const statusLower = status.toLowerCase();
+    
+    // First check for rejection keywords (highest priority)
+    const hasRejectionKeyword = POSTBACK_STATUS.REJECTION_KEYWORDS.some(keyword => 
+      statusLower.includes(keyword.toLowerCase())
+    );
+    
+    if (hasRejectionKeyword) {
+      return {
+        isValid: false,
+        reason: 'contains_rejection_keyword'
+      };
+    }
+    
+    // Check for lead/registration keywords (ignore completely)
+    const hasLeadKeyword = POSTBACK_STATUS.LEAD_KEYWORDS.some(keyword => 
+      statusLower.includes(keyword.toLowerCase())
+    );
+    
+    if (hasLeadKeyword && !statusLower.includes('dep') && !statusLower.includes('sale')) {
+      return {
+        isValid: false,
+        reason: 'is_lead_or_registration'
+      };
+    }
+    
+    // Check for deposit keywords
+    const hasDepositKeyword = POSTBACK_STATUS.DEPOSIT_KEYWORDS.some(keyword => 
+      statusLower.includes(keyword.toLowerCase())
+    );
+    
+    if (hasDepositKeyword) {
+      return {
+        isValid: true,
+        reason: 'contains_deposit_keyword'
+      };
+    }
+    
+    // Fallback to legacy exact match
+    if (POSTBACK_STATUS.EXACT_VALID_STATUSES.includes(status)) {
+      return {
+        isValid: true,
+        reason: 'exact_match_legacy'
+      };
+    }
+    
+    return {
+      isValid: false,
+      reason: 'no_deposit_indicators'
+    };
   }
   
   /**
