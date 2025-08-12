@@ -128,6 +128,27 @@ class TelegramDepositBot {
       res.status(200).send('pong');
     });
     
+    // Enhanced alive check with detailed info
+    this.app.get('/alive', (req, res) => {
+      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+      const memUsage = process.memoryUsage();
+      
+      res.status(200).json({
+        status: 'alive',
+        pid: process.pid,
+        uptime,
+        uptimeMinutes: Math.floor(uptime / 60),
+        memory: {
+          rss: Math.round(memUsage.rss / 1024 / 1024),
+          heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024)
+        },
+        lastActivity: this.lastActivity,
+        processedDeposits: this.processedDeposits,
+        timestamp: new Date().toISOString(),
+        moscowTime: new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })
+      });
+    });
+    
     // Health check endpoints
     this.app.get('/health', WebhookController.healthCheck);
     this.app.get('/admin/health-detailed', WebhookController.detailedHealthCheck);
@@ -242,11 +263,22 @@ class TelegramDepositBot {
       this.shutdown('unhandledRejection');
     });
     
-    // System signal handlers with detailed logging
+    // System signal handlers with IMMEDIATE logging (no buffers)
     process.on('SIGTERM', () => {
+      const startShutdownTime = Date.now();
       const memUsage = process.memoryUsage();
       const uptime = process.uptime();
       const uptimeMinutes = Math.floor(uptime / 60);
+      
+      // IMMEDIATE console output - bypass logger buffers
+      console.log('\n🚨🚨🚨 SIGTERM DETECTED - IMMEDIATE LOG 🚨🚨🚨');
+      console.log(`Uptime: ${Math.floor(uptime)}s (${uptimeMinutes}m)`);
+      console.log(`Memory: ${Math.round(memUsage.rss / 1024 / 1024)}MB`);
+      console.log(`PID: ${process.pid}`);
+      console.log(`Time: ${new Date().toISOString()}`);
+      
+      // Force immediate flush
+      process.stdout.write(`\n🚨 SIGTERM - PID ${process.pid} - ${uptimeMinutes}m - ${Math.round(memUsage.rss/1024/1024)}MB\n`);
       
       // Enhanced logging with Render-specific analysis
       logger.error('🚨 SIGTERM RECEIVED - Render.com Analysis', {
@@ -328,6 +360,9 @@ class TelegramDepositBot {
     });
     
     process.on('SIGINT', () => {
+      console.log('\n🛑 SIGINT received - Manual termination');
+      process.stdout.write(`\n🛑 SIGINT - PID ${process.pid} - ${Math.floor(process.uptime())}s\n`);
+      
       logger.error('📤 SIGINT received - Manual termination', {
         uptime: process.uptime(), 
         memory: process.memoryUsage(),
@@ -336,6 +371,21 @@ class TelegramDepositBot {
       });
       this.shutdown('SIGINT');
     });
+    
+    // Monitor for potential SIGKILL (can't catch it, but detect disappearance)
+    let lastAliveCheck = Date.now();
+    const aliveMonitor = setInterval(() => {
+      const now = Date.now();
+      const gap = now - lastAliveCheck;
+      
+      // If there's a significant gap, process might have been killed and restarted
+      if (gap > 45000) { // 45 second gap
+        console.log(`\n⚠️ PROCESS GAP DETECTED: ${gap}ms - possible SIGKILL/restart`);
+        process.stdout.write(`\n⚠️ GAP: ${gap}ms - PID ${process.pid}\n`);
+      }
+      
+      lastAliveCheck = now;
+    }, 15000); // Check every 15 seconds
     
     // Additional Render.com specific signals
     process.on('SIGHUP', () => {
@@ -690,6 +740,8 @@ class TelegramDepositBot {
         
         logger.info('📋 Available endpoints:');
         logger.info('   GET  /                      - API information');
+        logger.info('   GET  /ping                 - Simple keep-alive');
+        logger.info('   GET  /alive                - Enhanced process info');
         logger.info('   GET  /health               - Health check');
         logger.info('   GET  /postback             - Postback webhook');
         logger.info('   POST /postback             - Postback webhook');
@@ -895,12 +947,22 @@ class TelegramDepositBot {
   }
   
   /**
-   * Graceful shutdown with detailed diagnostics
+   * Graceful shutdown with detailed diagnostics and immediate logging
    */
   async shutdown(signal) {
     const shutdownStart = Date.now();
     const uptime = Math.floor((Date.now() - this.startTime) / 1000);
     const memUsage = process.memoryUsage();
+    
+    // IMMEDIATE console logging
+    console.log(`\n🚨 SHUTDOWN INITIATED - Signal: ${signal}`);
+    console.log(`Shutdown started at: ${new Date().toISOString()}`);
+    process.stdout.write(`\n🚨 SHUTDOWN: ${signal} - ${uptime}s - PID ${process.pid}\n`);
+    
+    // Force flush all logs immediately
+    if (logger && logger.end) {
+      logger.end();
+    }
     
     logger.error(`🚨 SHUTDOWN INITIATED - Signal: ${signal}`, {
       signal,
