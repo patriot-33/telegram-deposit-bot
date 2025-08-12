@@ -89,7 +89,7 @@ const API_CONFIG = {
       CONVERSIONS: '/conversions',
       REPORTS: '/reports'
     },
-    TIMEOUT: 10000,
+    TIMEOUT: 5000,
     RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000
   },

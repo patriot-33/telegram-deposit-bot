@@ -99,32 +99,43 @@ class KeitaroService {
       
       for (const endpoint of reportEndpoints) {
         try {
-          logger.info(`Trying endpoint: ${endpoint}`, { clickId });
+          logger.info(`🔍 Trying endpoint: ${endpoint}`, { clickId, timeout: 5000 });
+          
+          const requestConfig = {
+            timeout: 5000  // 5 second timeout per endpoint
+          };
           
           if (endpoint === '/conversions') {
             // For conversions endpoint, try simpler params
-            response = await this.client.get(endpoint, { 
-              params: { 
-                subid: clickId,
-                limit: 1
-              }
-            });
+            requestConfig.params = { 
+              subid: clickId,
+              limit: 1
+            };
           } else {
             // For reports endpoints, use complex params
-            response = await this.client.get(endpoint, { params: reportParams });
+            requestConfig.params = reportParams;
           }
           
+          const startTime = Date.now();
+          response = await this.client.get(endpoint, requestConfig);
+          const responseTime = Date.now() - startTime;
+          
           logger.info(`✅ Success with endpoint: ${endpoint}`, {
+            responseTime,
             dataType: typeof response.data,
             hasRows: !!response.data?.rows,
             dataLength: Array.isArray(response.data) ? response.data.length : 'N/A'
           });
           break;
         } catch (endpointError) {
-          logger.warn(`Failed with endpoint ${endpoint}:`, { 
+          const isTimeout = endpointError.code === 'ECONNABORTED';
+          logger.warn(`❌ Failed with endpoint ${endpoint}:`, { 
             status: endpointError.response?.status,
-            message: endpointError.message 
+            message: endpointError.message,
+            code: endpointError.code,
+            isTimeout
           });
+          
           if (endpoint === reportEndpoints[reportEndpoints.length - 1]) {
             // If this is the last endpoint, throw the error
             throw endpointError;

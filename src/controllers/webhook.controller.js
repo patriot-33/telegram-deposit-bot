@@ -65,8 +65,36 @@ class WebhookController {
         });
       }
       
-      // 3. Get click data from Keitaro reports
-      const clickData = await keitaroService.getClickById(postbackData.subid);
+      // 3. Get click data from Keitaro reports with timeout protection
+      let clickData;
+      try {
+        const startTime = Date.now();
+        clickData = await Promise.race([
+          keitaroService.getClickById(postbackData.subid),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Keitaro API timeout after 15s')), 15000)
+          )
+        ]);
+        
+        const responseTime = Date.now() - startTime;
+        logger.info('⏱️ Keitaro API response time', { responseTime, subid: postbackData.subid });
+        
+      } catch (error) {
+        logger.error('❌ Keitaro API failed or timeout', {
+          requestId,
+          subid: postbackData.subid,
+          error: error.message,
+          isTimeout: error.message.includes('timeout')
+        });
+        
+        // For timeout/error, ignore the postback to prevent hanging
+        return WebhookController._sendResponse(res, 200, {
+          message: 'Postback ignored - Keitaro API unavailable',
+          subid: postbackData.subid,
+          error: error.message,
+          requestId
+        });
+      }
       
       if (!clickData) {
         logger.warn('⚠️ Click not found in Keitaro reports', {
