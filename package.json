@@ -4,8 +4,8 @@
   "description": "Enterprise-grade Telegram bot for FB deposit notifications via Keitaro integration",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node --expose-gc --max-old-space-size=450 src/index.js",
+    "dev": "nodemon --expose-gc --max-old-space-size=450 src/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/",

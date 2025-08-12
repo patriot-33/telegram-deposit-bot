@@ -579,34 +579,79 @@ class TelegramDepositBot {
         logger.info(`   📊 ${config.owners.length} owner(s) configured`);
       });
       
-      // Setup resource monitoring and keep-alive for Render.com
+      // Setup aggressive resource monitoring for Render.com
       setInterval(() => {
         try {
           // Get memory and CPU usage
           const memUsage = process.memoryUsage();
           const uptime = process.uptime();
           
-          logger.info('📊 System resources', {
+          // Check for dangerous memory levels (Render Free Tier ~512MB)
+          const rssInMB = Math.round(memUsage.rss / 1024 / 1024);
+          const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+          
+          const memoryWarning = rssInMB > 400 ? '🚨 HIGH MEMORY' : rssInMB > 300 ? '⚠️ MEMORY WARNING' : '✅ MEMORY OK';
+          
+          logger.warn(`📊 Resource Check - ${memoryWarning}`, {
             uptime: Math.floor(uptime),
             memory: {
-              rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
-              heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+              rss: `${rssInMB}MB`,
+              heapUsed: `${heapUsedMB}MB`,
               heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
               external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+            },
+            limits: {
+              renderFreeLimit: '512MB',
+              dangerThreshold: '400MB',
+              warningThreshold: '300MB'
             },
             pid: process.pid,
             version: process.version,
             platform: process.platform
           });
           
-          // Self-ping to prevent hibernation on Render free tier
+          // If memory is dangerously high, force garbage collection
+          if (rssInMB > 400 && global.gc) {
+            logger.error('🚨 FORCING GARBAGE COLLECTION - Memory critical!');
+            global.gc();
+          }
+          
+          // Self-ping to prevent hibernation
           fetch(`http://localhost:${config.port}/health`)
             .catch(() => {}); // Ignore errors, just keep alive
             
         } catch (error) {
           logger.error('Resource monitoring error', { error: error.message });
         }
-      }, 5 * 60 * 1000); // Every 5 minutes
+      }, 2 * 60 * 1000); // Every 2 minutes (more frequent)
+      
+      // Dead man's switch - heartbeat every 30 seconds
+      let lastHeartbeat = Date.now();
+      setInterval(() => {
+        try {
+          const now = Date.now();
+          const timeSinceLastBeat = now - lastHeartbeat;
+          lastHeartbeat = now;
+          
+          logger.info('💓 Heartbeat alive', {
+            uptime: Math.floor(process.uptime()),
+            timeSinceLastBeat,
+            pid: process.pid,
+            memory: `${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`
+          });
+          
+          // If gap is too long, something killed the process
+          if (timeSinceLastBeat > 45000) {
+            logger.error('🚨 HEARTBEAT GAP DETECTED - Process was killed/frozen!', {
+              gapDuration: timeSinceLastBeat,
+              expectedInterval: 30000
+            });
+          }
+          
+        } catch (error) {
+          logger.error('Heartbeat error', { error: error.message });
+        }
+      }, 30 * 1000); // Every 30 seconds
       
       // Test services on startup
       setTimeout(async () => {
