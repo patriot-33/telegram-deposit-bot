@@ -315,7 +315,7 @@ class UserManagerService {
   static async getAllUsers() {
     try {
       const users = await User.findAll({
-        attributes: ['user_id', 'username', 'first_name', 'last_name', 'status', 'role', 'created_at', 'last_activity'],
+        attributes: ['id', 'username', 'first_name', 'last_name', 'status', 'role', 'created_at', 'last_activity'],
         order: [['created_at', 'DESC']]
       });
       

@@ -383,8 +383,8 @@ class TelegramBotService {
         message += `✅ *Одобренные (${groupedUsers.approved.length}):*\n`;
         for (const u of groupedUsers.approved.slice(0, 10)) {
           const roleEmoji = u.role === 'owner' ? '👑' : '👤';
-          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
-          message += `${roleEmoji} @${displayName} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.id));
+          message += `${roleEmoji} @${displayName} (ID: ${u.id})\n`;
         }
         if (groupedUsers.approved.length > 10) {
           message += `... и еще ${groupedUsers.approved.length - 10}\n`;
@@ -396,8 +396,8 @@ class TelegramBotService {
       if (groupedUsers.pending.length > 0) {
         message += `⏳ *Ожидают (${groupedUsers.pending.length}):*\n`;
         for (const u of groupedUsers.pending.slice(0, 5)) {
-          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
-          message += `👤 @${displayName} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.id));
+          message += `👤 @${displayName} (ID: ${u.id})\n`;
         }
         if (groupedUsers.pending.length > 5) {
           message += `... и еще ${groupedUsers.pending.length - 5}\n`;
@@ -409,8 +409,8 @@ class TelegramBotService {
       if (groupedUsers.banned.length > 0) {
         message += `🚫 *Заблокированные (${groupedUsers.banned.length}):*\n`;
         for (const u of groupedUsers.banned.slice(0, 5)) {
-          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
-          message += `🚫 @${displayName} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.id));
+          message += `🚫 @${displayName} (ID: ${u.id})\n`;
         }
         if (groupedUsers.banned.length > 5) {
           message += `... и еще ${groupedUsers.banned.length - 5}\n`;
@@ -532,9 +532,10 @@ class TelegramBotService {
         );
         
         if (result.success) {
-          // Update message
-          const newMessage = callbackQuery.message.text + 
-                           `\n\n${action === 'approve' ? '✅' : '❌'} ${result.message}`;
+          // Update message with proper escaping
+          const statusEmoji = action === 'approve' ? '✅' : '❌';
+          const statusMessage = this._escapeMarkdown(`${statusEmoji} ${result.message}`);
+          const newMessage = callbackQuery.message.text + `\n\n${statusMessage}`;
           
           await this.bot.editMessageText(newMessage, {
             chat_id: chatId,
@@ -1073,11 +1074,11 @@ class TelegramBotService {
       // Show first 8 users with buttons
       for (let i = 0; i < Math.min(approvedUsers.length, 8); i++) {
         const user = approvedUsers[i];
-        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.id}`);
         const displayName = this._escapeMarkdown(rawName);
         
         keyboard.inline_keyboard.push([
-          { text: `🚫 Забанить ${displayName}`, callback_data: `ban_user_${user.user_id}` }
+          { text: `🚫 Забанить ${displayName}`, callback_data: `ban_user_${user.id}` }
         ]);
       }
       
@@ -1117,12 +1118,12 @@ class TelegramBotService {
       
       // Show all banned users with unban buttons
       for (const user of bannedUsers) {
-        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.id}`);
         const displayName = this._escapeMarkdown(rawName);
-        message += `🚫 ${displayName} (ID: ${user.user_id})\n`;
+        message += `🚫 ${displayName} (ID: ${user.id})\n`;
         
         keyboard.inline_keyboard.push([
-          { text: `✅ Разблокировать ${displayName}`, callback_data: `unban_user_${user.user_id}` }
+          { text: `✅ Разблокировать ${displayName}`, callback_data: `unban_user_${user.id}` }
         ]);
       }
       
