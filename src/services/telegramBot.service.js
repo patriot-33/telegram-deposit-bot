@@ -211,8 +211,8 @@ class TelegramBotService {
                        `/status - Статистика пользователей\n` +
                        `/users - Список пользователей\n` +
                        `/requests - Заявки на вступление\n` +
-                       `/ban <user_id> - Заблокировать пользователя\n` +
-                       `/unban <user_id> - Разблокировать пользователя\n\n` +
+                       `/ban <user\\_id> - Заблокировать пользователя\n` +
+                       `/unban <user\\_id> - Разблокировать пользователя\n\n` +
                        `Бот готов к работе! 🚀`;
         
         await this.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -287,8 +287,8 @@ class TelegramBotService {
                 `/status - Статистика пользователей\n` +
                 `/users - Список пользователей\n` +
                 `/requests - Заявки на вступление\n` +
-                `/ban <user_id> - Заблокировать пользователя\n` +
-                `/unban <user_id> - Разблокировать пользователя\n\n` +
+                `/ban <user\\_id> - Заблокировать пользователя\n` +
+                `/unban <user\\_id> - Разблокировать пользователя\n\n` +
                 `*Общие команды:*\n` +
                 `/help - Эта справка\n\n` +
                 `Бот автоматически отправляет уведомления о депозитах всем одобренным пользователям.`;
@@ -338,6 +338,102 @@ class TelegramBotService {
         error: error.message
       });
       await this.sendMessage(chatId, '❌ Ошибка получения статистики');
+    }
+  }
+  
+  /**
+   * Handle /users command (owners only)
+   */
+  async handleUsersCommand(msg) {
+    const chatId = msg.chat.id;
+    const user = msg.from;
+    
+    if (msg.chat.type !== 'private') return;
+    
+    if (!UserManagerService.isOwner(user.id)) {
+      await this.sendMessage(chatId, '❌ Команда доступна только владельцам');
+      return;
+    }
+    
+    try {
+      const users = await UserManagerService.getAllUsers();
+      
+      if (users.length === 0) {
+        await this.sendMessage(chatId, '📭 Пользователей не найдено');
+        return;
+      }
+      
+      // Group users by status
+      const groupedUsers = {
+        approved: users.filter(u => u.status === 'approved'),
+        pending: users.filter(u => u.status === 'pending'),
+        rejected: users.filter(u => u.status === 'rejected'),
+        banned: users.filter(u => u.status === 'banned')
+      };
+      
+      let message = `👥 *Управление пользователями* (${users.length} всего)\n\n`;
+      
+      // Approved users
+      if (groupedUsers.approved.length > 0) {
+        message += `✅ *Одобренные (${groupedUsers.approved.length}):*\n`;
+        for (const u of groupedUsers.approved.slice(0, 10)) {
+          const roleEmoji = u.role === 'owner' ? '👑' : '👤';
+          message += `${roleEmoji} @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+        }
+        if (groupedUsers.approved.length > 10) {
+          message += `... и еще ${groupedUsers.approved.length - 10}\n`;
+        }
+        message += '\n';
+      }
+      
+      // Pending users  
+      if (groupedUsers.pending.length > 0) {
+        message += `⏳ *Ожидают (${groupedUsers.pending.length}):*\n`;
+        for (const u of groupedUsers.pending.slice(0, 5)) {
+          message += `👤 @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+        }
+        if (groupedUsers.pending.length > 5) {
+          message += `... и еще ${groupedUsers.pending.length - 5}\n`;
+        }
+        message += '\n';
+      }
+      
+      // Banned users
+      if (groupedUsers.banned.length > 0) {
+        message += `🚫 *Заблокированные (${groupedUsers.banned.length}):*\n`;
+        for (const u of groupedUsers.banned.slice(0, 5)) {
+          message += `🚫 @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+        }
+        if (groupedUsers.banned.length > 5) {
+          message += `... и еще ${groupedUsers.banned.length - 5}\n`;
+        }
+        message += '\n';
+      }
+      
+      // Management buttons
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '👥 Управление пользователями', callback_data: 'manage_users' },
+            { text: '🚫 Управление банами', callback_data: 'manage_bans' }
+          ],
+          [
+            { text: '📊 Полная статистика', callback_data: 'users_stats' }
+          ]
+        ]
+      };
+      
+      await this.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+      
+    } catch (error) {
+      logger.error('Error handling users command', {
+        userId: user.id,
+        error: error.message
+      });
+      await this.sendMessage(chatId, '❌ Ошибка получения списка пользователей');
     }
   }
   
@@ -412,9 +508,9 @@ class TelegramBotService {
         return;
       }
       
-      const [action, requestId] = data.split('_');
-      
-      if (action === 'approve' || action === 'reject') {
+      // Handle different callback patterns
+      if (data.startsWith('approve_') || data.startsWith('reject_')) {
+        const [action, requestId] = data.split('_');
         const result = await UserManagerService.processJoinRequest(
           parseInt(requestId),
           action,
@@ -446,6 +542,46 @@ class TelegramBotService {
             text: result.message,
             show_alert: true
           });
+        }
+      } else if (data === 'manage_users') {
+        // Show user management options
+        await this.showUserManagement(chatId);
+        await this.bot.answerCallbackQuery(callbackQuery.id);
+        
+      } else if (data === 'manage_bans') {
+        // Show ban management options
+        await this.showBanManagement(chatId);
+        await this.bot.answerCallbackQuery(callbackQuery.id);
+        
+      } else if (data === 'users_stats') {
+        // Show detailed user statistics
+        await this.showUserStats(chatId);
+        await this.bot.answerCallbackQuery(callbackQuery.id);
+        
+      } else if (data.startsWith('ban_user_')) {
+        const targetUserId = data.split('_')[2];
+        const result = await UserManagerService.banUser(parseInt(targetUserId), userId);
+        
+        await this.bot.answerCallbackQuery(callbackQuery.id, {
+          text: result.message,
+          show_alert: true
+        });
+        
+        if (result.success) {
+          await this.showBanManagement(chatId);
+        }
+        
+      } else if (data.startsWith('unban_user_')) {
+        const targetUserId = data.split('_')[2];
+        const result = await UserManagerService.unbanUser(parseInt(targetUserId), userId);
+        
+        await this.bot.answerCallbackQuery(callbackQuery.id, {
+          text: result.message,
+          show_alert: true
+        });
+        
+        if (result.success) {
+          await this.showBanManagement(chatId);
         }
       }
       
@@ -862,6 +998,132 @@ class TelegramBotService {
       return `$${amount.toFixed(2)}`;
     } catch (error) {
       return '$0.00';
+    }
+  }
+
+  /**
+   * Show user management interface
+   */
+  async showUserManagement(chatId) {
+    try {
+      const users = await UserManagerService.getAllUsers();
+      const approvedUsers = users.filter(u => u.status === 'approved' && u.role !== 'owner');
+      
+      if (approvedUsers.length === 0) {
+        await this.sendMessage(chatId, '📭 Нет пользователей для управления');
+        return;
+      }
+      
+      let message = `👥 *Управление пользователями*\n\n`;
+      message += `Выберите пользователя для действий:\n\n`;
+      
+      const keyboard = {
+        inline_keyboard: []
+      };
+      
+      // Show first 8 users with buttons
+      for (let i = 0; i < Math.min(approvedUsers.length, 8); i++) {
+        const user = approvedUsers[i];
+        const displayName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        
+        keyboard.inline_keyboard.push([
+          { text: `🚫 Забанить ${displayName}`, callback_data: `ban_user_${user.user_id}` }
+        ]);
+      }
+      
+      if (approvedUsers.length > 8) {
+        message += `\n_Показаны первые 8 из ${approvedUsers.length} пользователей_`;
+      }
+      
+      await this.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+      
+    } catch (error) {
+      logger.error('Error showing user management', { error: error.message });
+      await this.sendMessage(chatId, '❌ Ошибка загрузки управления пользователями');
+    }
+  }
+
+  /**
+   * Show ban management interface
+   */
+  async showBanManagement(chatId) {
+    try {
+      const users = await UserManagerService.getAllUsers();
+      const bannedUsers = users.filter(u => u.status === 'banned');
+      
+      if (bannedUsers.length === 0) {
+        await this.sendMessage(chatId, '✅ Нет заблокированных пользователей');
+        return;
+      }
+      
+      let message = `🚫 *Заблокированные пользователи*\n\n`;
+      
+      const keyboard = {
+        inline_keyboard: []
+      };
+      
+      // Show all banned users with unban buttons
+      for (const user of bannedUsers) {
+        const displayName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        message += `🚫 ${displayName} (ID: ${user.user_id})\n`;
+        
+        keyboard.inline_keyboard.push([
+          { text: `✅ Разблокировать ${displayName}`, callback_data: `unban_user_${user.user_id}` }
+        ]);
+      }
+      
+      await this.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+      
+    } catch (error) {
+      logger.error('Error showing ban management', { error: error.message });
+      await this.sendMessage(chatId, '❌ Ошибка загрузки управления банами');
+    }
+  }
+
+  /**
+   * Show detailed user statistics
+   */
+  async showUserStats(chatId) {
+    try {
+      const stats = await UserManagerService.getUserStats();
+      const users = await UserManagerService.getAllUsers();
+      
+      // Calculate additional stats
+      const recentUsers = users.filter(u => {
+        const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        return new Date(u.created_at) > dayAgo;
+      }).length;
+      
+      const activeUsers = users.filter(u => {
+        if (!u.last_activity) return false;
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        return new Date(u.last_activity) > weekAgo;
+      }).length;
+      
+      const message = `📊 *Детальная статистика пользователей*\n\n` +
+                     `👥 Всего пользователей: *${stats.total}*\n` +
+                     `✅ Одобрено: *${stats.approved}*\n` +
+                     `⏳ Ожидают: *${stats.pending}*\n` +
+                     `❌ Отклонено: *${stats.rejected}*\n` +
+                     `🚫 Заблокировано: *${stats.banned}*\n` +
+                     `👑 Владельцы: *${stats.owners}*\n\n` +
+                     `📈 *Активность:*\n` +
+                     `🆕 Новых за 24ч: *${recentUsers}*\n` +
+                     `🔥 Активных за неделю: *${activeUsers}*\n` +
+                     `📝 Заявок на рассмотрении: *${stats.pendingRequests}*\n\n` +
+                     `📅 Данные актуальны на: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`;
+      
+      await this.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      
+    } catch (error) {
+      logger.error('Error showing user stats', { error: error.message });
+      await this.sendMessage(chatId, '❌ Ошибка загрузки статистики');
     }
   }
 }

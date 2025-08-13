@@ -310,6 +310,25 @@ class UserManagerService {
   }
   
   /**
+   * Get all users 
+   */
+  static async getAllUsers() {
+    try {
+      const users = await User.findAll({
+        attributes: ['user_id', 'username', 'first_name', 'last_name', 'status', 'role', 'created_at', 'last_activity'],
+        order: [['created_at', 'DESC']]
+      });
+      
+      return users;
+    } catch (error) {
+      logger.error('Error getting all users', {
+        error: error.message
+      });
+      return [];
+    }
+  }
+
+  /**
    * Get approved users for broadcasting
    */
   static async getApprovedUsers() {
