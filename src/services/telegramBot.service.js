@@ -231,12 +231,17 @@ class TelegramBotService {
         const requestResult = await UserManagerService.createJoinRequest(user);
         
         if (requestResult.success) {
+          // Escape Markdown special characters in user data
+          const firstName = this._escapeMarkdown(user.first_name || 'Не указано');
+          const lastName = this._escapeMarkdown(user.last_name || '');
+          const username = this._escapeMarkdown(user.username || 'Не указан');
+          
           const message = `📝 *Заявка отправлена*\n\n` +
                          `Ваша заявка на доступ к боту отправлена владельцам.\n` +
                          `Ожидайте подтверждения.\n\n` +
                          `*Информация о вас:*\n` +
-                         `👤 Имя: ${user.first_name || 'Не указано'} ${user.last_name || ''}\n` +
-                         `🔖 Ник: @${user.username || 'Не указан'}\n` +
+                         `👤 Имя: ${firstName} ${lastName}\n` +
+                         `🔖 Ник: @${username}\n` +
                          `🆔 ID: \`${user.id}\``;
           
           await this.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -378,7 +383,8 @@ class TelegramBotService {
         message += `✅ *Одобренные (${groupedUsers.approved.length}):*\n`;
         for (const u of groupedUsers.approved.slice(0, 10)) {
           const roleEmoji = u.role === 'owner' ? '👑' : '👤';
-          message += `${roleEmoji} @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
+          message += `${roleEmoji} @${displayName} (ID: ${u.user_id})\n`;
         }
         if (groupedUsers.approved.length > 10) {
           message += `... и еще ${groupedUsers.approved.length - 10}\n`;
@@ -390,7 +396,8 @@ class TelegramBotService {
       if (groupedUsers.pending.length > 0) {
         message += `⏳ *Ожидают (${groupedUsers.pending.length}):*\n`;
         for (const u of groupedUsers.pending.slice(0, 5)) {
-          message += `👤 @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
+          message += `👤 @${displayName} (ID: ${u.user_id})\n`;
         }
         if (groupedUsers.pending.length > 5) {
           message += `... и еще ${groupedUsers.pending.length - 5}\n`;
@@ -402,7 +409,8 @@ class TelegramBotService {
       if (groupedUsers.banned.length > 0) {
         message += `🚫 *Заблокированные (${groupedUsers.banned.length}):*\n`;
         for (const u of groupedUsers.banned.slice(0, 5)) {
-          message += `🚫 @${u.username || u.first_name || u.user_id} (ID: ${u.user_id})\n`;
+          const displayName = this._escapeMarkdown(u.username || u.first_name || String(u.user_id));
+          message += `🚫 @${displayName} (ID: ${u.user_id})\n`;
         }
         if (groupedUsers.banned.length > 5) {
           message += `... и еще ${groupedUsers.banned.length - 5}\n`;
@@ -460,12 +468,18 @@ class TelegramBotService {
       }
       
       for (const request of requests) {
+        // Escape Markdown special characters in user data
+        const firstName = this._escapeMarkdown(request.first_name || 'Не указано');
+        const lastName = this._escapeMarkdown(request.last_name || '');
+        const username = this._escapeMarkdown(request.username || 'Не указан');
+        const userMessage = request.message ? this._escapeMarkdown(request.message) : '';
+        
         const message = `📝 *Новая заявка*\n\n` +
-                       `👤 Имя: ${request.first_name || 'Не указано'} ${request.last_name || ''}\n` +
-                       `🔖 Ник: @${request.username || 'Не указан'}\n` +
+                       `👤 Имя: ${firstName} ${lastName}\n` +
+                       `🔖 Ник: @${username}\n` +
                        `🆔 ID: \`${request.user_id}\`\n` +
                        `📅 Дата: ${request.created_at.toLocaleDateString('ru-RU')}\n` +
-                       `${request.message ? `💬 Сообщение: ${request.message}` : ''}`;
+                       `${userMessage ? `💬 Сообщение: ${userMessage}` : ''}`;
         
         const keyboard = {
           inline_keyboard: [
@@ -623,9 +637,10 @@ class TelegramBotService {
       const result = await UserManagerService.banUser(userId, ownerId);
       
       if (result.success) {
+        const username = this._escapeMarkdown(result.user.username || 'Не указан');
         const message = `🚫 Пользователь заблокирован\n\n` +
                        `ID: \`${userId}\`\n` +
-                       `Ник: @${result.user.username || 'Не указан'}`;
+                       `Ник: @${username}`;
         
         await this.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         
@@ -674,9 +689,10 @@ class TelegramBotService {
       const result = await UserManagerService.unbanUser(userId, ownerId);
       
       if (result.success) {
+        const username = this._escapeMarkdown(result.user.username || 'Не указан');
         const message = `✅ Пользователь разблокирован\n\n` +
                        `ID: \`${userId}\`\n` +
-                       `Ник: @${result.user.username || 'Не указан'}`;
+                       `Ник: @${username}`;
         
         await this.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         
@@ -823,9 +839,14 @@ class TelegramBotService {
    */
   async notifyOwnersAboutNewRequest(user, request) {
     try {
+      // Escape Markdown special characters in user data
+      const firstName = this._escapeMarkdown(user.first_name || 'Не указано');
+      const lastName = this._escapeMarkdown(user.last_name || '');
+      const username = this._escapeMarkdown(user.username || 'Не указан');
+      
       const message = `🔔 *Новая заявка на доступ*\n\n` +
-                     `👤 Имя: ${user.first_name || 'Не указано'} ${user.last_name || ''}\n` +
-                     `🔖 Ник: @${user.username || 'Не указан'}\n` +
+                     `👤 Имя: ${firstName} ${lastName}\n` +
+                     `🔖 Ник: @${username}\n` +
                      `🆔 ID: \`${user.id}\`\n` +
                      `📅 Дата: ${new Date().toLocaleDateString('ru-RU')}\n\n` +
                      `Используйте /requests для обработки заявок.`;
@@ -992,6 +1013,34 @@ class TelegramBotService {
       .replace(/'/g, '&#39;');
   }
   
+  _escapeMarkdown(text) {
+    if (typeof text !== 'string') {
+      return String(text || '');
+    }
+    
+    // Escape special Markdown characters
+    return text
+      .replace(/\\/g, '\\\\')  // Backslash must be escaped first
+      .replace(/\*/g, '\\*')   // Asterisk
+      .replace(/_/g, '\\_')    // Underscore
+      .replace(/\[/g, '\\[')   // Square brackets
+      .replace(/\]/g, '\\]')
+      .replace(/\(/g, '\\(')   // Parentheses
+      .replace(/\)/g, '\\)')
+      .replace(/~/g, '\\~')    // Tilde
+      .replace(/`/g, '\\`')    // Backtick
+      .replace(/>/g, '\\>')    // Greater than
+      .replace(/#/g, '\\#')    // Hash
+      .replace(/\+/g, '\\+')   // Plus
+      .replace(/-/g, '\\-')    // Minus
+      .replace(/=/g, '\\=')    // Equals
+      .replace(/\|/g, '\\|')   // Pipe
+      .replace(/\{/g, '\\{')   // Curly braces
+      .replace(/\}/g, '\\}')
+      .replace(/\./g, '\\.')   // Period
+      .replace(/!/g, '\\!');   // Exclamation
+  }
+  
   _formatPayout(payout) {
     try {
       const amount = parseFloat(payout) || 0;
@@ -1024,7 +1073,8 @@ class TelegramBotService {
       // Show first 8 users with buttons
       for (let i = 0; i < Math.min(approvedUsers.length, 8); i++) {
         const user = approvedUsers[i];
-        const displayName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const displayName = this._escapeMarkdown(rawName);
         
         keyboard.inline_keyboard.push([
           { text: `🚫 Забанить ${displayName}`, callback_data: `ban_user_${user.user_id}` }
@@ -1067,7 +1117,8 @@ class TelegramBotService {
       
       // Show all banned users with unban buttons
       for (const user of bannedUsers) {
-        const displayName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const rawName = user.username ? `@${user.username}` : (user.first_name || `ID: ${user.user_id}`);
+        const displayName = this._escapeMarkdown(rawName);
         message += `🚫 ${displayName} (ID: ${user.user_id})\n`;
         
         keyboard.inline_keyboard.push([
