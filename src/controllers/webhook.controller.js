@@ -5,7 +5,7 @@
 
 const Joi = require('joi');
 const logger = require('../utils/logger');
-const { ERROR_CODES, POSTBACK_STATUS } = require('../config/constants');
+const { ERROR_CODES, POSTBACK_STATUS, KNOWN_FB_POSTBACK_SOURCES } = require('../config/constants');
 const keitaroService = require('../services/keitaro.service');
 const telegramBotService = require('../services/telegramBot.service');
 const trafficSourceService = require('../services/trafficSource.service');
@@ -17,6 +17,29 @@ const postbackSchema = Joi.object({
   payout: Joi.number().positive().optional(),
   geo: Joi.string().length(2).optional()
 }).unknown(true); // Allow additional fields
+
+// Cache to prevent duplicate processing of same SubID
+// Using Map for better performance and automatic cleanup
+const processedSubIdsCache = new Map();
+const CACHE_CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour cleanup
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours TTL
+
+// Cleanup cache periodically
+setInterval(() => {
+  const now = Date.now();
+  let cleanedCount = 0;
+  
+  for (const [subId, timestamp] of processedSubIdsCache.entries()) {
+    if (now - timestamp > CACHE_TTL) {
+      processedSubIdsCache.delete(subId);
+      cleanedCount++;
+    }
+  }
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 Cleaned up ${cleanedCount} expired SubIDs from cache`);
+  }
+}, CACHE_CLEANUP_INTERVAL);
 
 class WebhookController {
   /**
@@ -42,6 +65,27 @@ class WebhookController {
     });
     
     try {
+      // 0. Check cache to prevent duplicate processing
+      const subIdFromQuery = req.query.subid;
+      if (subIdFromQuery && processedSubIdsCache.has(subIdFromQuery)) {
+        const cachedTime = processedSubIdsCache.get(subIdFromQuery);
+        const ageMinutes = Math.floor((Date.now() - cachedTime) / (1000 * 60));
+        
+        logger.info('⚠️ Duplicate SubID detected - skipping processing', {
+          requestId,
+          subid: subIdFromQuery,
+          cachedAgo: `${ageMinutes} minutes`,
+          reason: 'Already processed recently'
+        });
+        
+        return WebhookController._sendResponse(res, 200, {
+          message: 'Duplicate SubID - already processed',
+          subid: subIdFromQuery,
+          cachedAgo: `${ageMinutes} minutes`,
+          requestId
+        });
+      }
+
       // 1. Validate postback data
       const validationResult = await WebhookController._validatePostback(req.query);
       if (!validationResult.isValid) {
@@ -104,19 +148,73 @@ class WebhookController {
       }
       
       if (!clickData) {
-        logger.info('ℹ️ No conversion found for SubID', {
+        logger.info('⚠️ No conversion found on first attempt, trying retry with delay', {
           requestId,
           subid: postbackData.subid,
-          reason: 'SubID has no conversion (click without lead/sale)',
+          reason: 'First API call returned null - possible indexing delay',
           postbackFrom: postbackData.from
         });
         
-        return WebhookController._sendResponse(res, 200, {
-          message: 'Postback ignored - no conversion found for SubID',
-          subid: postbackData.subid,
-          reason: 'Click exists but no conversion recorded',
-          requestId
-        });
+        // Wait 30 seconds for Keitaro to potentially index the conversion
+        await new Promise(resolve => setTimeout(resolve, 30000));
+        
+        // Retry Keitaro API call
+        try {
+          clickData = await keitaroService.getClickById(postbackData.subid);
+          logger.info('🔄 Retry API call completed', {
+            requestId,
+            subid: postbackData.subid,
+            retrySuccess: !!clickData
+          });
+        } catch (retryError) {
+          logger.error('❌ Retry API call failed', {
+            requestId,
+            subid: postbackData.subid,
+            retryError: retryError.message
+          });
+        }
+        
+        // If still no data after retry, use fallback mechanism
+        if (!clickData) {
+          logger.info('🔄 Activating fallback mechanism after retry failed', {
+            requestId,
+            subid: postbackData.subid,
+            postbackFrom: postbackData.from
+          });
+          
+          const fallbackResult = await WebhookController._processFallbackDeposit(postbackData, requestId);
+          
+          if (fallbackResult.processed) {
+            // Add SubID to cache after successful fallback processing
+            processedSubIdsCache.set(postbackData.subid, Date.now());
+            
+            logger.info('✅ Fallback processing successful', {
+              requestId,
+              subid: postbackData.subid,
+              fallbackUsed: true,
+              cachedForDuplicatePrevention: true
+            });
+            return WebhookController._sendResponse(res, 200, fallbackResult.response);
+          } else {
+            logger.info('⏭️ Fallback declined to process - ignoring postback', {
+              requestId,
+              subid: postbackData.subid,
+              fallbackReason: fallbackResult.reason
+            });
+            return WebhookController._sendResponse(res, 200, {
+              message: 'Postback ignored after retry and fallback',
+              subid: postbackData.subid,
+              reason: fallbackResult.reason,
+              requestId
+            });
+          }
+        } else {
+          logger.info('✅ Retry successful - continuing with retrieved data', {
+            requestId,
+            subid: postbackData.subid,
+            retryWorked: true
+          });
+        }
       }
       
       logger.info('✅ Real click data retrieved from Keitaro', {
@@ -165,11 +263,15 @@ class WebhookController {
       const notificationResult = await telegramBotService.sendDepositNotification(enrichedData);
       
       if (notificationResult.success) {
+        // Add SubID to cache after successful processing
+        processedSubIdsCache.set(postbackData.subid, Date.now());
+        
         logger.info('✅ Deposit notification sent successfully', {
           requestId,
           subid: postbackData.subid,
           payout: postbackData.payout,
-          processingTime: Date.now() - startTime
+          processingTime: Date.now() - startTime,
+          cachedForDuplicatePrevention: true
         });
         
         return WebhookController._sendResponse(res, 200, {
@@ -489,44 +591,44 @@ class WebhookController {
         payout: postbackData.payout
       });
 
-      // 1. Detect FB source from postback 'from' parameter
-      const fbPartners = ['pinco.partners', 'pwa.partners', 'facebook', 'fb', 'meta'];
-      const isFBFromPostback = postbackData.from && 
-        fbPartners.some(partner => 
-          postbackData.from.toLowerCase().includes(partner.toLowerCase())
-        );
-
-      if (!isFBFromPostback) {
-        logger.info('⏭️ Fallback ignored - non-FB source detected', {
+      // 1. Detect FB source from postback 'from' parameter using known sources mapping
+      const fromParam = (postbackData.from || '').toLowerCase();
+      const knownFBSource = KNOWN_FB_POSTBACK_SOURCES[fromParam];
+      
+      if (!knownFBSource) {
+        logger.info('⏭️ Fallback ignored - unknown or non-FB source', {
           requestId,
           from: postbackData.from,
-          subid: postbackData.subid
+          subid: postbackData.subid,
+          availableSources: Object.keys(KNOWN_FB_POSTBACK_SOURCES)
         });
         
         return {
           processed: false,
-          reason: 'Non-FB source detected in postback'
+          reason: `Unknown postback source: ${postbackData.from}. Known FB sources: ${Object.keys(KNOWN_FB_POSTBACK_SOURCES).join(', ')}`
         };
       }
 
-      logger.info('✅ FB source detected in postback - proceeding with fallback', {
+      logger.info('✅ Known FB source detected in postback - proceeding with fallback', {
         requestId,
         from: postbackData.from,
+        mappedSource: knownFBSource.name,
+        trafficSourceId: knownFBSource.traffic_source_id,
         subid: postbackData.subid
       });
 
-      // 2. Create enriched data from postback
+      // 2. Create enriched data from postback using known source mapping
       const enrichedData = {
         subid1: postbackData.subid.slice(0, 8), // Extract buyer ID from SubID
-        geo: 'Unknown (no Keitaro data)',
+        geo: postbackData.geo || 'Unknown', // Use postback geo if available
         payout: parseFloat(postbackData.payout) || 0,
-        traffic_source_name: postbackData.from || 'Unknown Source',
-        offer_name: 'Unknown Offer',
-        campaign_name: 'Unknown Campaign',
-        subid2: 'Unknown',
-        subid4: 'Unknown',
+        traffic_source_name: knownFBSource.name,
+        offer_name: 'Unknown Offer (Fallback)',
+        campaign_name: 'Unknown Campaign (Fallback)',
+        subid2: 'Unknown (Fallback)',
+        subid4: 'Unknown (Fallback)',
         timestamp: new Date().toISOString(),
-        traffic_source_id: 16, // PWA Partners source ID
+        traffic_source_id: knownFBSource.traffic_source_id,
         clickId: postbackData.subid,
         fallbackUsed: true // Flag to indicate this is fallback data
       };

@@ -235,6 +235,67 @@ class KeitaroService {
   }
   
   /**
+   * Get all conversions for a specific date range (for audit purposes)
+   * @param {string} dateFrom - Start date (YYYY-MM-DD)
+   * @param {string} dateTo - End date (YYYY-MM-DD)
+   * @returns {Array} Array of conversions
+   */
+  async getConversionsForPeriod(dateFrom, dateTo) {
+    try {
+      logger.info('📊 Fetching conversions for period', { dateFrom, dateTo });
+      
+      const endpoint = '/conversions/log';
+      const params = {
+        range: `${dateFrom},${dateTo}`,
+        columns: [
+          'sub_id', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
+          'status', 'revenue', 'country', 'traffic_source_id', 'traffic_source_name',
+          'campaign_name', 'offer_name', 'created_at', 'click_id'
+        ],
+        limit: 10000 // High limit to get all conversions
+      };
+      
+      logger.debug('Making request to conversions endpoint', { endpoint, params });
+      
+      const response = await this.client.get(endpoint, { params });
+      
+      if (!response.data || !response.data.rows) {
+        logger.warn('No conversion data returned', { response: response.data });
+        return [];
+      }
+      
+      const conversions = response.data.rows.map(row => {
+        // Convert array response to object using column names
+        const conversion = {};
+        response.data.columns.forEach((column, index) => {
+          conversion[column] = row[index];
+        });
+        return conversion;
+      });
+      
+      logger.info('✅ Conversions retrieved for audit', {
+        dateFrom,
+        dateTo,
+        totalConversions: conversions.length,
+        saleConversions: conversions.filter(c => c.status === 'sale').length
+      });
+      
+      return conversions;
+      
+    } catch (error) {
+      logger.error('❌ Failed to get conversions for period', {
+        dateFrom,
+        dateTo,
+        error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      
+      throw new Error(`Failed to fetch conversions: ${error.message}`);
+    }
+  }
+  
+  /**
    * Health check for Keitaro API
    */
   async checkHealth() {

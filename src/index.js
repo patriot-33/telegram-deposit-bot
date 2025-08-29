@@ -28,6 +28,7 @@ const trafficSourceService = require('./services/trafficSource.service');
 // Import services for health checks
 const keitaroService = require('./services/keitaro.service');
 const telegramBotService = require('./services/telegramBot.service');
+const auditScheduler = require('./services/auditScheduler.service');
 
 // Import database models
 const { initializeDatabase, checkDatabaseHealth } = require('./models');
@@ -196,6 +197,14 @@ class TelegramDepositBot {
     
     // Traffic sources info endpoint
     this.app.get('/admin/traffic-sources', this.getTrafficSources.bind(this));
+    
+    // Fallback mechanism monitoring endpoint
+    this.app.get('/admin/fallback-stats', this.getFallbackStats.bind(this));
+    
+    // Deposit audit endpoints
+    this.app.post('/admin/audit-deposits', this.auditDeposits.bind(this));
+    this.app.get('/admin/audit-deposit/:subid', this.auditSpecificDeposit.bind(this));
+    this.app.get('/admin/audit-scheduler', this.getAuditSchedulerStats.bind(this));
     
     // 404 handler
     this.app.use('*', (req, res) => {
@@ -723,6 +732,187 @@ class TelegramDepositBot {
   }
   
   /**
+   * Get fallback mechanism statistics
+   */
+  async getFallbackStats(req, res) {
+    try {
+      // Import WebhookController to get cache stats
+      const WebhookController = require('./controllers/webhook.controller');
+      
+      const stats = {
+        fallbackMechanism: {
+          enabled: true,
+          version: '2.0.0',
+          features: [
+            'Retry mechanism with 30s delay',
+            'Known FB source mapping',
+            'Duplicate prevention cache',
+            'Enhanced logging'
+          ]
+        },
+        cache: {
+          totalCachedSubIds: WebhookController.getCacheSize ? WebhookController.getCacheSize() : 'N/A',
+          cacheTTL: '24 hours',
+          cleanupInterval: '1 hour'
+        },
+        knownFBSources: Object.keys(require('./config/constants').KNOWN_FB_POSTBACK_SOURCES),
+        mappedSources: Object.entries(require('./config/constants').KNOWN_FB_POSTBACK_SOURCES).map(([key, value]) => ({
+          postbackSource: key,
+          trafficSourceName: value.name,
+          trafficSourceId: value.traffic_source_id
+        })),
+        retryConfiguration: {
+          retryDelay: '30 seconds',
+          maxRetries: 1,
+          fallbackAfterRetryFails: true
+        },
+        monitoring: {
+          endpoint: '/admin/fallback-stats',
+          testScript: 'test_fallback_mechanism.js'
+        },
+        timestamp: new Date().toISOString()
+      };
+      
+      res.json(stats);
+    } catch (error) {
+      logger.error('Error getting fallback stats', { error: error.message });
+      res.status(500).json({
+        error: 'Failed to get fallback statistics',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Audit deposits - compare Keitaro deposits with sent notifications
+   */
+  async auditDeposits(req, res) {
+    try {
+      const { dateFrom, dateTo } = req.body;
+      
+      // Validate dates
+      if (!dateFrom || !dateTo) {
+        return res.status(400).json({
+          error: 'dateFrom and dateTo are required',
+          example: {
+            dateFrom: '2025-08-29',
+            dateTo: '2025-08-29'
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Validate date format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(dateFrom) || !dateRegex.test(dateTo)) {
+        return res.status(400).json({
+          error: 'Invalid date format, use YYYY-MM-DD',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      logger.info('🔍 Starting deposit audit', { dateFrom, dateTo });
+      
+      // Run audit using DepositAuditService
+      const DepositAuditService = require('./services/depositAudit.service');
+      const auditResults = await DepositAuditService.auditDeposits(dateFrom, dateTo);
+      
+      logger.info('✅ Deposit audit completed', {
+        auditId: auditResults.audit.auditId,
+        missingDeposits: auditResults.statistics.missingNotifications,
+        successRate: auditResults.statistics.successRate
+      });
+      
+      res.json(auditResults);
+      
+    } catch (error) {
+      logger.error('❌ Deposit audit failed', {
+        error: error.message,
+        stack: error.stack
+      });
+      
+      res.status(500).json({
+        error: 'Audit failed',
+        message: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
+   * Audit specific deposit by SubID
+   */
+  async auditSpecificDeposit(req, res) {
+    try {
+      const { subid } = req.params;
+      
+      if (!subid) {
+        return res.status(400).json({
+          error: 'SubID is required',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      logger.info('🔍 Auditing specific deposit', { subid });
+      
+      const DepositAuditService = require('./services/depositAudit.service');
+      const auditResult = await DepositAuditService.auditSpecificDeposit(subid);
+      
+      res.json({
+        audit: {
+          subid,
+          timestamp: new Date().toISOString()
+        },
+        result: auditResult
+      });
+      
+    } catch (error) {
+      logger.error('❌ Specific deposit audit failed', {
+        subid: req.params.subid,
+        error: error.message
+      });
+      
+      res.status(500).json({
+        error: 'Specific audit failed',
+        message: error.message,
+        subid: req.params.subid,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Get audit scheduler statistics
+   */
+  async getAuditSchedulerStats(req, res) {
+    try {
+      const schedulerStats = auditScheduler.getSchedulerStats();
+      
+      res.json({
+        auditScheduler: {
+          ...schedulerStats,
+          description: 'Автоматический планировщик аудита депозитов',
+          features: [
+            'Ежедневный аудит в 09:00 MSK',
+            'Еженедельный отчет в воскресенье 10:00 MSK', 
+            'Экстренная проверка каждые 4 часа',
+            'Автоматические уведомления в Telegram',
+            'История аудитов и трендовый анализ'
+          ]
+        },
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      logger.error('Error getting audit scheduler stats', { error: error.message });
+      res.status(500).json({
+        error: 'Failed to get scheduler statistics',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  /**
    * Start the server
    */
   async start() {
@@ -743,6 +933,10 @@ class TelegramDepositBot {
       if (!trafficSourceValidation.valid) {
         throw new Error(`Traffic source configuration invalid: ${trafficSourceValidation.error}`);
       }
+      
+      // Start automatic audit scheduler
+      logger.info('📅 Starting audit scheduler...');
+      auditScheduler.start();
       
       // Start server
       this.server = this.app.listen(config.port, () => {
@@ -808,6 +1002,9 @@ class TelegramDepositBot {
         logger.info('   POST /admin/setup-webhook  - Setup Telegram webhook manually');
         logger.info('   GET  /admin/webhook-info   - Get current webhook info');
         logger.info('   GET  /admin/traffic-sources - Traffic sources info');
+        logger.info('   GET  /admin/fallback-stats - Fallback mechanism statistics');
+        logger.info('   POST /admin/audit-deposits - Audit deposits for date range');
+        logger.info('   GET  /admin/audit-deposit/:subid - Audit specific deposit');
         logger.info('');
         logger.info('🤖 Telegram Bot Features:');
         logger.info('   📱 User management with approval system');
@@ -1060,6 +1257,14 @@ class TelegramDepositBot {
       logger.end();
     }
     
+    // Stop audit scheduler
+    try {
+      logger.info('📅 Stopping audit scheduler...');
+      auditScheduler.stop();
+    } catch (error) {
+      logger.warn('Failed to stop audit scheduler', { error: error.message });
+    }
+
     logger.error(`🚨 SHUTDOWN INITIATED - Signal: ${signal}`, {
       signal,
       uptime,

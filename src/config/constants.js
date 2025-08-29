@@ -111,6 +111,46 @@ const LIMITS = {
   }
 };
 
+// Known FB Postback Sources Configuration
+// Maps postback 'from' parameter to Keitaro traffic source data
+const KNOWN_FB_POSTBACK_SOURCES = {
+  'bettitltr': { 
+    name: 'WWA (BettiltTR)', 
+    traffic_source_id: 17, 
+    description: 'WWA via BettiltTR postbacks' 
+  },
+  'pwa.partners': { 
+    name: 'PWA Partners', 
+    traffic_source_id: 16, 
+    description: 'PWA Partners direct postbacks' 
+  },
+  'pinco.partners': { 
+    name: 'PWA Partners (PINCO)', 
+    traffic_source_id: 16, 
+    description: 'PWA Partners via PINCO postbacks' 
+  },
+  'wwapps': { 
+    name: 'WWA', 
+    traffic_source_id: 17, 
+    description: 'WWA direct postbacks' 
+  },
+  'wwa': { 
+    name: 'WWA', 
+    traffic_source_id: 17, 
+    description: 'WWA short form postbacks' 
+  },
+  'skakapp.com': { 
+    name: 'Skakapp.com', 
+    traffic_source_id: 11, 
+    description: 'Skakapp direct postbacks' 
+  },
+  'skakapp': { 
+    name: 'Skakapp.com', 
+    traffic_source_id: 11, 
+    description: 'Skakapp short form postbacks' 
+  }
+};
+
 // Error Codes
 const ERROR_CODES = {
   INVALID_POSTBACK: 'INVALID_POSTBACK',
@@ -119,7 +159,8 @@ const ERROR_CODES = {
   NON_FB_SOURCE: 'NON_FB_SOURCE',
   INVALID_STATUS: 'INVALID_STATUS',
   TELEGRAM_ERROR: 'TELEGRAM_ERROR',
-  SYSTEM_ERROR: 'SYSTEM_ERROR'
+  SYSTEM_ERROR: 'SYSTEM_ERROR',
+  FALLBACK_USED: 'FALLBACK_USED'
 };
 
 module.exports = {
@@ -128,5 +169,6 @@ module.exports = {
   MESSAGE_TEMPLATES,
   API_CONFIG,
   LIMITS,
-  ERROR_CODES
+  ERROR_CODES,
+  KNOWN_FB_POSTBACK_SOURCES
 };
