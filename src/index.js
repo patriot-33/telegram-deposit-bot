@@ -742,12 +742,13 @@ class TelegramDepositBot {
       const stats = {
         fallbackMechanism: {
           enabled: true,
-          version: '2.0.0',
+          version: '3.0.0',
           features: [
-            'Retry mechanism with 30s delay',
+            'Multi-retry with exponential backoff (30s, 1min, 2min)',
+            'Eventual consistency handling for Keitaro API',
             'Known FB source mapping',
             'Duplicate prevention cache',
-            'Enhanced logging'
+            'Enhanced logging with retry tracking'
           ]
         },
         cache: {
@@ -762,9 +763,12 @@ class TelegramDepositBot {
           trafficSourceId: value.traffic_source_id
         })),
         retryConfiguration: {
-          retryDelay: '30 seconds',
-          maxRetries: 1,
-          fallbackAfterRetryFails: true
+          retryDelays: ['30 seconds', '1 minute', '2 minutes'],
+          maxRetries: 3,
+          totalMaxWaitTime: '3.5 minutes',
+          backoffType: 'exponential',
+          fallbackAfterRetryFails: true,
+          eventualConsistencyHandling: true
         },
         monitoring: {
           endpoint: '/admin/fallback-stats',

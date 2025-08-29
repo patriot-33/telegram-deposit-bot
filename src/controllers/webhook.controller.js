@@ -5,7 +5,7 @@
 
 const Joi = require('joi');
 const logger = require('../utils/logger');
-const { ERROR_CODES, POSTBACK_STATUS, KNOWN_FB_POSTBACK_SOURCES } = require('../config/constants');
+const { ERROR_CODES, POSTBACK_STATUS, KNOWN_FB_POSTBACK_SOURCES, RETRY_CONFIG } = require('../config/constants');
 const keitaroService = require('../services/keitaro.service');
 const telegramBotService = require('../services/telegramBot.service');
 const trafficSourceService = require('../services/trafficSource.service');
@@ -148,34 +148,72 @@ class WebhookController {
       }
       
       if (!clickData) {
-        logger.info('⚠️ No conversion found on first attempt, trying retry with delay', {
+        logger.info('⚠️ No conversion found, starting retry sequence with exponential backoff', {
           requestId,
           subid: postbackData.subid,
-          reason: 'First API call returned null - possible indexing delay',
+          reason: 'API returned null - possible eventual consistency delay',
           postbackFrom: postbackData.from
         });
         
-        // Wait 30 seconds for Keitaro to potentially index the conversion
-        await new Promise(resolve => setTimeout(resolve, 30000));
+        // Retry configuration with exponential backoff from constants
+        const retryDelays = RETRY_CONFIG.DELAYS;
+        const maxRetries = RETRY_CONFIG.MAX_RETRIES;
+        let retryCount = 0;
         
-        // Retry Keitaro API call
-        try {
-          clickData = await keitaroService.getClickById(postbackData.subid);
-          logger.info('🔄 Retry API call completed', {
+        // Try multiple times with increasing delays
+        while (retryCount < maxRetries && !clickData) {
+          const currentDelay = retryDelays[retryCount];
+          const delaySeconds = currentDelay / 1000;
+          
+          logger.info(`⏳ Waiting ${delaySeconds} seconds before retry attempt ${retryCount + 1}/${maxRetries}`, {
             requestId,
             subid: postbackData.subid,
-            retrySuccess: !!clickData
+            attemptNumber: retryCount + 1,
+            delaySeconds
           });
-        } catch (retryError) {
-          logger.error('❌ Retry API call failed', {
-            requestId,
-            subid: postbackData.subid,
-            retryError: retryError.message
-          });
+          
+          // Wait with current delay
+          await new Promise(resolve => setTimeout(resolve, currentDelay));
+          
+          // Retry Keitaro API call
+          try {
+            clickData = await keitaroService.getClickById(postbackData.subid);
+            
+            if (clickData) {
+              logger.info('✅ Retry successful on attempt ' + (retryCount + 1), {
+                requestId,
+                subid: postbackData.subid,
+                attemptNumber: retryCount + 1,
+                totalWaitTime: retryDelays.slice(0, retryCount + 1).reduce((a, b) => a + b, 0) / 1000 + 's'
+              });
+            } else {
+              logger.info(`⚠️ Retry attempt ${retryCount + 1} returned null`, {
+                requestId,
+                subid: postbackData.subid
+              });
+            }
+          } catch (retryError) {
+            logger.error(`❌ Retry attempt ${retryCount + 1} failed with error`, {
+              requestId,
+              subid: postbackData.subid,
+              attemptNumber: retryCount + 1,
+              retryError: retryError.message
+            });
+          }
+          
+          retryCount++;
         }
         
-        // If still no data after retry, use fallback mechanism
+        // If still no data after all retries, use fallback mechanism
         if (!clickData) {
+          const totalWaitTime = retryDelays.reduce((a, b) => a + b, 0) / 1000;
+          logger.info(`🔄 All ${maxRetries} retry attempts exhausted after ${totalWaitTime}s total wait time, activating fallback`, {
+            requestId,
+            subid: postbackData.subid,
+            postbackFrom: postbackData.from,
+            totalAttempts: maxRetries + 1, // including initial attempt
+            totalWaitTime: totalWaitTime + 's'
+          });
           logger.info('🔄 Activating fallback mechanism after retry failed', {
             requestId,
             subid: postbackData.subid,

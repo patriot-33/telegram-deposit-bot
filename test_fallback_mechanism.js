@@ -7,14 +7,14 @@ const axios = require('axios');
 
 const BASE_URL = 'http://localhost:3000';
 
-// Test cases covering all scenarios
+// Test cases covering all scenarios including new retry mechanism
 const testCases = [
   {
-    name: 'Known FB Source - should trigger fallback',
+    name: 'Known FB Source - should try retries then fallback',
     params: {
       from: 'bettitltr',
       status: 'dep',
-      subid: 'test_fallback_001',
+      subid: 'test_retry_001',
       payout: 60,
       currency: 'usd'
     },
@@ -73,7 +73,7 @@ async function runTest(testCase) {
   try {
     const response = await axios.get(`${BASE_URL}/postback`, {
       params: testCase.params,
-      timeout: 120000 // 2 minute timeout for retry mechanism
+      timeout: 300000 // 5 minute timeout for new multi-retry mechanism (up to 3.5 min wait)
     });
     
     console.log(`   ✅ Status: ${response.status}`);

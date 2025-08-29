@@ -151,6 +151,15 @@ const KNOWN_FB_POSTBACK_SOURCES = {
   }
 };
 
+// Retry configuration for Keitaro API eventual consistency delays
+const RETRY_CONFIG = {
+  DELAYS: [30000, 60000, 120000], // 30 seconds, 1 minute, 2 minutes  
+  MAX_RETRIES: 3,
+  TOTAL_MAX_WAIT_TIME: 210000, // 3.5 minutes total
+  BACKOFF_TYPE: 'exponential',
+  DESCRIPTION: 'Handles eventual consistency delays in Keitaro API responses'
+};
+
 // Error Codes
 const ERROR_CODES = {
   INVALID_POSTBACK: 'INVALID_POSTBACK',
@@ -170,5 +179,6 @@ module.exports = {
   API_CONFIG,
   LIMITS,
   ERROR_CODES,
-  KNOWN_FB_POSTBACK_SOURCES
+  KNOWN_FB_POSTBACK_SOURCES,
+  RETRY_CONFIG
 };
