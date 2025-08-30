@@ -815,6 +815,7 @@ class TelegramBotService {
         '{campaign_name}': this._escapeHtml(data.campaign_name || 'N/A'),
         '{subid2}': this._escapeHtml(data.subid2 || 'N/A'),
         '{subid4}': this._escapeHtml(data.subid4 || 'N/A'),
+        '{clickId}': this._escapeHtml(data.clickId || 'N/A'),
         '{payout}': this._formatPayout(data.payout)
       };
       

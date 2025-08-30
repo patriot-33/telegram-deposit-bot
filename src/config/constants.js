@@ -59,6 +59,7 @@ const MESSAGE_TEMPLATES = {
 💰 <b>Доход:</b> {payout}
 🆔 <b>ID баера:</b> {subid1}
 🌍 <b>ГЕО:</b> {geo}
+🔍 <b>SubID:</b> <code>{clickId}</code>
 
 📊 <b>Детали:</b>
 🎯 Оффер: {offer_name}

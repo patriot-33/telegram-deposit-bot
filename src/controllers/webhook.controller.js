@@ -442,7 +442,8 @@ class WebhookController {
         subid2: clickData?.sub_id_2 || 'N/A',
         subid4: clickData?.sub_id_4 || 'N/A',
         timestamp: new Date().toISOString(),
-        traffic_source_id: clickData?.traffic_source_id || 0
+        traffic_source_id: clickData?.traffic_source_id || 0,
+        clickId: postbackData.subid
       };
     }
   }
