@@ -1256,38 +1256,34 @@ class TelegramDepositBot {
     console.log(`Shutdown started at: ${new Date().toISOString()}`);
     process.stdout.write(`\n🚨 SHUTDOWN: ${signal} - ${uptime}s - PID ${process.pid}\n`);
     
-    // Force flush all logs immediately
-    if (logger && logger.end) {
-      logger.end();
-    }
-    
-    // Stop audit scheduler
+    // Log shutdown info before closing logger
     try {
+      logger.error(`🚨 SHUTDOWN INITIATED - Signal: ${signal}`, {
+        signal,
+        uptime,
+        startTime: new Date(this.startTime).toISOString(),
+        processedDeposits: this.processedDeposits,
+        lastActivity: this.lastActivity,
+        memory: {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`
+        },
+        pid: process.pid,
+        nodeVersion: process.version,
+        platform: process.platform
+      });
+      
+      // Stop audit scheduler
       logger.info('📅 Stopping audit scheduler...');
       auditScheduler.stop();
     } catch (error) {
-      logger.warn('Failed to stop audit scheduler', { error: error.message });
+      console.log('Failed during shutdown logging:', error.message);
     }
-
-    logger.error(`🚨 SHUTDOWN INITIATED - Signal: ${signal}`, {
-      signal,
-      uptime,
-      startTime: new Date(this.startTime).toISOString(),
-      processedDeposits: this.processedDeposits,
-      lastActivity: this.lastActivity,
-      memory: {
-        rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
-        heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
-        heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`
-      },
-      pid: process.pid,
-      nodeVersion: process.version,
-      platform: process.platform
-    });
     
     if (this.server) {
       this.server.close(() => {
-        logger.error('🛑 HTTP server closed - sending notifications');
+        console.log('🛑 HTTP server closed - sending notifications');
         
         // Enhanced shutdown notification with diagnostics
         const shutdownMessage = `🛑 <b>Бот завершает работу</b>\n\n` +
@@ -1301,23 +1297,41 @@ class TelegramDepositBot {
         
         const promises = config.owners.map(ownerId => 
           telegramBotService.sendMessage(ownerId, shutdownMessage, { parse_mode: 'HTML' })
-            .catch(err => logger.warn(`Failed to send shutdown notification to ${ownerId}`, { error: err.message }))
+            .catch(err => console.log(`Failed to send shutdown notification to ${ownerId}:`, err.message))
         );
         
         Promise.allSettled(promises).finally(() => {
           const shutdownTime = Date.now() - shutdownStart;
-          logger.error(`💀 SHUTDOWN COMPLETED - Duration: ${shutdownTime}ms`);
+          console.log(`💀 SHUTDOWN COMPLETED - Duration: ${shutdownTime}ms`);
+          
+          // Close logger stream properly before exit
+          if (logger && typeof logger.end === 'function') {
+            logger.end();
+          }
+          
           process.exit(0);
         });
       });
       
       // Force shutdown after 8 seconds (shorter timeout)
       setTimeout(() => {
-        logger.error('💥 FORCE SHUTDOWN - Timeout reached after 8s');
+        console.log('💥 FORCE SHUTDOWN - Timeout reached after 8s');
+        
+        // Close logger stream before force exit
+        if (logger && typeof logger.end === 'function') {
+          logger.end();
+        }
+        
         process.exit(1);
       }, 8000);
     } else {
-      logger.error('💀 IMMEDIATE EXIT - No server to close');
+      console.log('💀 IMMEDIATE EXIT - No server to close');
+      
+      // Close logger stream before immediate exit
+      if (logger && typeof logger.end === 'function') {
+        logger.end();
+      }
+      
       process.exit(0);
     }
   }
