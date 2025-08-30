@@ -98,10 +98,12 @@ class DepositAuditService {
         return [];
       }
       
-      // Filter only sale/deposit status conversions
+      // Filter only sale/deposit status conversions (already filtered in getConversionsForPeriod)
+      // Additional filtering for deposit-specific statuses
       const deposits = conversions.filter(conversion => {
         const status = (conversion.status || '').toLowerCase();
-        return status === 'sale' || status.includes('dep') || status.includes('deposit');
+        return status === 'sale' || status === 'lead' || status.includes('dep') || 
+               status.includes('deposit') || status === 'confirmed' || status === 'approved';
       });
       
       logger.info('✅ Keitaro deposits retrieved', {
@@ -122,14 +124,15 @@ class DepositAuditService {
    */
   static _filterFBDeposits(deposits) {
     const fbDeposits = deposits.filter(deposit => {
-      const trafficSourceId = deposit.traffic_source_id;
+      // Use trafficSourceId from the new standardized format
+      const trafficSourceId = deposit.trafficSourceId || deposit.traffic_source_id;
       return trafficSourceService.isFBSource(trafficSourceId);
     });
     
     logger.info('🎯 FB deposits filtered', {
       totalDeposits: deposits.length,
       fbDeposits: fbDeposits.length,
-      filterRate: `${Math.round(fbDeposits.length / deposits.length * 100)}%`
+      filterRate: deposits.length > 0 ? `${Math.round(fbDeposits.length / deposits.length * 100)}%` : '0%'
     });
     
     return fbDeposits;
@@ -231,7 +234,8 @@ class DepositAuditService {
     const found = [];
     
     for (const deposit of keitaroDeposits) {
-      const subId = deposit.sub_id || deposit.subid || deposit.click_id;
+      // Use standardized format from getConversionsForPeriod
+      const subId = deposit.subId || deposit.sub_id || deposit.subid || deposit.click_id;
       
       if (!subId) {
         logger.warn('⚠️ Deposit without SubID found', { deposit });
@@ -272,8 +276,8 @@ class DepositAuditService {
   static _determineMissingReason(deposit) {
     const reasons = [];
     
-    // Check if traffic source is properly mapped
-    const trafficSourceId = deposit.traffic_source_id;
+    // Check if traffic source is properly mapped (use standardized format)
+    const trafficSourceId = deposit.trafficSourceId || deposit.traffic_source_id;
     if (!trafficSourceService.isFBSource(trafficSourceId)) {
       reasons.push('Non-FB traffic source');
     }
@@ -287,7 +291,7 @@ class DepositAuditService {
     }
     
     // Check timing - deposits very recent might still be processing
-    const depositTime = new Date(deposit.created_at || deposit.timestamp);
+    const depositTime = new Date(deposit.datetime || deposit.postbackDatetime || deposit.created_at || deposit.timestamp);
     const now = new Date();
     const ageMinutes = (now - depositTime) / (1000 * 60);
     

@@ -389,6 +389,141 @@ class KeitaroService {
   }
 
   /**
+   * Get conversions for a specific period
+   * Used by audit service to fetch all conversions in date range
+   */
+  async getConversionsForPeriod(dateFrom, dateTo) {
+    try {
+      logger.info('📊 Fetching conversions for period', { dateFrom, dateTo });
+      
+      // Convert dates to YYYY-MM-DD HH:MM:SS format
+      const startDate = `${dateFrom} 00:00:00`;
+      const endDate = `${dateTo} 23:59:59`;
+      
+      // Try conversions/log first, fall back to clicks/log if needed
+      let response;
+      try {
+        response = await this.client.post('/conversions/log', {
+          limit: 10000, // High limit to get all conversions
+          columns: [
+            'sub_id', 'sub_id_1', 'sub_id_2', 'sub_id_4', 
+            'country', 'status', 'revenue', 'payout',
+            'ts_id', 'campaign_id', 'campaign', 
+            'offer_id', 'offer', 'ts', 
+            'postback_datetime', 'datetime',
+            'affiliate_network_id', 'affiliate_network'
+          ],
+          filters: [
+            {
+              name: 'datetime',
+              operator: 'BETWEEN',
+              expression: [startDate, endDate]
+            },
+            {
+              name: 'status',
+              operator: 'IN',
+              expression: ['lead', 'sale', 'confirmed', 'approved']
+            }
+          ],
+          sort: [
+            {
+              name: 'datetime',
+              order: 'desc'
+            }
+          ]
+        });
+      } catch (convError) {
+        // If conversions endpoint fails, try clicks endpoint
+        if (convError.response?.status === 404) {
+          logger.warn('⚠️ /conversions/log endpoint not found, trying /clicks/log');
+          
+          response = await this.client.post('/clicks/log', {
+            limit: 10000,
+            columns: [
+              'sub_id', 'sub_id_1', 'sub_id_2', 'sub_id_4',
+              'country', 'conversion_status', 'conversion_revenue', 'conversion_payout',
+              'traffic_source_id', 'campaign_id', 'campaign_name',
+              'offer_id', 'offer_name', 'traffic_source_name',
+              'created_at', 'datetime', 'conversion_datetime'
+            ],
+            filters: [
+              {
+                name: 'datetime',
+                operator: 'BETWEEN',
+                expression: [startDate, endDate]
+              },
+              {
+                name: 'conversion_status',
+                operator: 'NOT_EMPTY'
+              }
+            ],
+            sort: [
+              {
+                name: 'datetime',
+                order: 'desc'
+              }
+            ]
+          });
+        } else {
+          throw convError;
+        }
+      }
+
+      const conversions = response.data?.rows || [];
+      
+      logger.info('✅ Fetched conversions from Keitaro', {
+        count: conversions.length,
+        dateFrom,
+        dateTo
+      });
+      
+      // Map conversions to standardized format (support both endpoints)
+      return conversions.map(conv => ({
+        subId: conv.sub_id,
+        subId1: conv.sub_id_1,
+        subId2: conv.sub_id_2,
+        subId4: conv.sub_id_4,
+        country: conv.country,
+        status: conv.status || conv.conversion_status,
+        revenue: conv.revenue || conv.payout || conv.conversion_revenue || conv.conversion_payout || 0,
+        trafficSourceId: conv.ts_id || conv.traffic_source_id,
+        trafficSourceName: conv.ts || conv.traffic_source_name,
+        campaignId: conv.campaign_id,
+        campaignName: conv.campaign || conv.campaign_name,
+        offerId: conv.offer_id,
+        offerName: conv.offer || conv.offer_name,
+        affiliateNetworkId: conv.affiliate_network_id,
+        affiliateNetworkName: conv.affiliate_network,
+        datetime: conv.datetime || conv.postback_datetime || conv.conversion_datetime || conv.created_at,
+        postbackDatetime: conv.postback_datetime || conv.conversion_datetime
+      }));
+      
+    } catch (error) {
+      logger.error('❌ Failed to fetch conversions for period', {
+        error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        dateFrom,
+        dateTo
+      });
+      
+      // More specific error message based on status
+      if (error.response?.status === 404) {
+        throw new Error(`Failed to fetch conversions: Endpoint not found (404). Check if /conversions/log is the correct endpoint for your Keitaro version.`);
+      } else if (error.response?.status === 401) {
+        throw new Error(`Failed to fetch conversions: Unauthorized (401). Check API key configuration.`);
+      } else if (error.response?.status === 403) {
+        throw new Error(`Failed to fetch conversions: Forbidden (403). Check API key permissions.`);
+      } else {
+        throw new Error(`Failed to fetch conversions: ${error.message}`);
+      }
+    }
+  }
+
+  /**
    * Get traffic source name helper
    * Maps traffic source ID to readable name
    */
